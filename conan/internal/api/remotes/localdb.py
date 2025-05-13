@@ -104,3 +104,21 @@ class LocalDB:
                 connection.commit()
             except Exception as e:
                 raise ConanException("Could not store credentials %s" % str(e))
+
+
+    @contextmanager
+    def lock(self):
+        """ Create a transcation lock on the database,
+        so that no other process can write to it.
+         If a lock is already present, this will wait"""
+        # yield
+        # return
+        with self._connect() as connection:
+            try:
+                connection.execute("BEGIN EXCLUSIVE")
+                yield
+            except Exception as e:
+                connection.close()  # Or rollback?
+                raise e
+            finally:
+                connection.close()  # Or rollback?

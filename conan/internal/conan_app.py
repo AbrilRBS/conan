@@ -49,8 +49,8 @@ class ConanBasicApp:
         self.cache_folder = cache_folder
         self.cache = PkgCache(self.cache_folder, global_conf)
         # Wraps RestApiClient to add authentication support (same interface)
-        localdb = LocalDB(cache_folder)
-        auth_manager = ConanApiAuthManager(conan_api.remotes.requester, cache_folder, localdb, global_conf)
+        self.localdb = LocalDB(cache_folder)
+        auth_manager = ConanApiAuthManager(conan_api.remotes.requester, cache_folder, self.localdb, global_conf)
         # Handle remote connections
         self.remote_manager = RemoteManager(self.cache, auth_manager, cache_folder)
         global_editables = conan_api.local.editable_packages

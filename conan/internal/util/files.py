@@ -253,7 +253,7 @@ def mkdir(path):
     """Recursive mkdir, doesnt fail if already existing"""
     if os.path.exists(path):
         return
-    os.makedirs(path)
+    os.makedirs(path, exist_ok=True)
 
 
 def gzopen_without_timestamps(name, mode="r", fileobj=None, compresslevel=None, **kwargs):

@@ -17,8 +17,10 @@ class ExportAPI:
         ConanOutput().title("Exporting recipe to the cache")
         app = ConanApp(self.conan_api)
         hook_manager = self.conan_api.config.hook_manager
-        return cmd_export(app, hook_manager, self.conan_api.config.global_conf, path, name, version,
-                          user, channel, graph_lock=lockfile, remotes=remotes)
+        with app.localdb.lock():
+            result = cmd_export(app, hook_manager, self.conan_api.config.global_conf, path, name, version,
+                              user, channel, graph_lock=lockfile, remotes=remotes)
+        return result
 
     def export_pkg(self, deps_graph, source_folder, output_folder):
         cache = PkgCache(self.conan_api.cache_folder, self.conan_api.config.global_conf)
