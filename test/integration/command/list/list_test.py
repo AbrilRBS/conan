@@ -19,7 +19,7 @@ from conan.internal.util.files import save
 class TestParamErrors:
 
     def test_default_pattern(self):
-        c = TestClient()
+        c = TestClient(light=True)
         c.run("list")
         assert "Found 0 pkg/version" in c.out
 
@@ -33,7 +33,7 @@ class TestParamErrors:
         assert "ERROR: Remote 'remote1' can't be found or is disabled" in c.out
 
     def test_query_param(self):
-        c = TestClient()
+        c = TestClient(light=True)
         c.run("list * --graph=myjson", assert_error=True)
         assert "ERROR: Cannot define both the pattern and the graph json file" in c.out
 
@@ -78,28 +78,60 @@ class TestParamErrors:
 def client():
     servers = OrderedDict([("default", TestServer()),
                            ("other", TestServer())])
-    c = TestClient(servers=servers, inputs=2*["admin", "password"])
+    c = TestClient(servers=servers, inputs=2*["admin", "password"], light=True)
+    def _conandata(versions):
+        result = "sources:\n"
+        for v in versions:
+            result += f"  {v}:\n    url: foo\n    sha256: bar\n"
+        return result
+    def _config(versions):
+        result = "versions:\n"
+        for v in versions:
+            result += f"  {v}:\n    folder: all\n"
+        return result
     c.save({
-        "zlib.py": GenConanfile("zlib"),
-        "zlib_ng.py": GenConanfile("zlib_ng", "1.0.0"),
-        "zli.py": GenConanfile("zli", "1.0.0"),
+        "repo/recipes/zlib/config.yml": _config(["1.0.0", "2.0.0"]),
+        "repo/recipes/zlib/all/conandata.yml": _conandata(["1.0.0", "2.0.0"]),
+        "repo/recipes/zlib/all/conanfile.py": GenConanfile("zlib")
+            .with_class_attribute("user='user'")
+            .with_class_attribute("channel='channel'"),
+
+        # "repo/recipes/zlib_ng/config.yml": _config(["1.0.0"]),
+        # "repo/recipes/zlib_ng/all/conandata.yml": _conandata(["1.0.0"]),
+        # "repo/recipes/zlib_ng/all/conanfile.py": GenConanfile("zlib_ng", "1.0.0"),
+
+        "repo/recipes/zli/config.yml": _config(["1.0.0"]),
+        "repo/recipes/zli/all/conandata.yml": _conandata(["1.0.0"]),
+        "repo/recipes/zli/all/conanfile.py": GenConanfile("zli", "1.0.0"),
         "zli_rev2.py": GenConanfile("zli", "1.0.0").with_settings("os")
                                                    .with_package_file("f.txt", env_var="MYREV"),
-        "zlix.py": GenConanfile("zlix", "1.0.0"),
-        "test.py": GenConanfile("test", "1.0").with_requires("zlix/1.0.0")
+
+        "repo/recipes/zlix/config.yml": _config(["1.0.0"]),
+        "repo/recipes/zlix/all/conandata.yml": _conandata(["1.0.0"]),
+        "repo/recipes/zlix/all/conanfile.py": GenConanfile("zlix", "1.0.0"),
+
+        "repo/recipes/test/config.yml": _config(["1.0.0"]),
+        "repo/recipes/test/all/conandata.yml": _conandata(["1.0.0"]),
+        "repo/recipes/test/all/conanfile.py": GenConanfile("test", "1.0").with_requires("zlix/1.0.0")
 
                                               .with_python_requires("zlix/1.0.0"),
-        "conf.py": GenConanfile("conf", "1.0")
+
+        "repo/recipes/conf/config.yml": _config(["1.0"]),
+        "repo/recipes/conf/all/conandata.yml": _conandata(["1.0"]),
+        "repo/recipes/conf/all/conanfile.py": GenConanfile("conf", "1.0")
     })
-    c.run("create zli.py")
-    c.run("create zlib.py --version=1.0.0 --user=user --channel=channel")
-    c.run("create zlib.py --version=2.0.0 --user=user --channel=channel")
-    c.run("create zlix.py")
-    c.run("create test.py")
-    c.run('create conf.py -c tools.info.package_id:confs="[\'tools.build:cxxflags\']"'
+    c.run("create repo/recipes/zli/all")
+    c.run("create repo/recipes/zlib/all --version=1.0.0")
+    c.run("create repo/recipes/zlib/all --version=2.0.0")
+    c.run("create repo/recipes/zlix/all")
+    c.run("create repo/recipes/test/all")
+    c.run('create repo/recipes/conf/all -c tools.info.package_id:confs="[\'tools.build:cxxflags\']"'
           ' -c tools.build:cxxflags="[\'--flag1\']"')
     c.run("upload * -r=default -c")
     c.run("upload * -r=other -c")
+
+    c.run("remote add local ./repo")
+
 
     time.sleep(1.0)
     # We create and upload new revisions later, to avoid timestamp overlaps (low resolution)
@@ -126,8 +158,12 @@ class TestListRefs:
 
     @staticmethod
     def check(client, pattern, remote, expected):
-        r = "-r=default" if remote else ""
-        r_msg = "default" if remote else "Local Cache"
+        r = remote
+        r_msg = {
+            "": "Local Cache",
+            "-r=default": "default",
+            "-r=local": "local"
+        }[r]
         client.run(f"list {pattern} {r}")
         expected = textwrap.indent(expected, "  ")
         expected_output = f"{r_msg}\n" + expected
@@ -137,14 +173,18 @@ class TestListRefs:
 
     @staticmethod
     def check_json(client, pattern, remote, expected):
-        r = "-r=default" if remote else ""
-        r_msg = "default" if remote else "Local Cache"
+        r = remote
+        r_msg = {
+            "": "Local Cache",
+            "-r=default": "default",
+            "-r=local": "local"
+        }[r]
         client.run(f"list {pattern} {r} --format=json", redirect_stdout="file.json")
         list_json = client.load("file.json")
         list_json = json.loads(list_json)
         assert remove_timestamps(list_json[r_msg]) == remove_timestamps(expected)
 
-    @pytest.mark.parametrize("remote", [True, False])
+    @pytest.mark.parametrize("remote", ["", "-r=default", "-r=local"])
     def test_list_recipes(self, client, remote):
         pattern = "z*"
         expected = textwrap.dedent(f"""\
@@ -165,7 +205,7 @@ class TestListRefs:
         }
         self.check_json(client, pattern, remote, expected_json)
 
-    @pytest.mark.parametrize("remote", [True, False])
+    @pytest.mark.parametrize("remote", ["", "-r=default", "-r=local"])
     def test_list_recipes_only_user_channel(self, client, remote):
         pattern = "*@user/channel"
         expected = textwrap.dedent(f"""\
@@ -180,7 +220,7 @@ class TestListRefs:
         }
         self.check_json(client, pattern, remote, expected_json)
 
-    @pytest.mark.parametrize("remote", [True, False])
+    @pytest.mark.parametrize("remote", ["", "-r=default", "-r=local"])
     def test_list_recipes_without_user_channel(self, client, remote):
         pattern = "z*@"
         expected = textwrap.dedent(f"""\
@@ -191,7 +231,7 @@ class TestListRefs:
             """)
         self.check(client, pattern, remote, expected)
 
-    @pytest.mark.parametrize("remote", [True, False])
+    @pytest.mark.parametrize("remote", ["", "-r=default", "-r=local"])
     @pytest.mark.parametrize("pattern", ["zlib", "zlib/*", "*@user/channel"])
     def test_list_recipe_versions(self, client, pattern, remote):
         expected = textwrap.dedent(f"""\
@@ -206,7 +246,7 @@ class TestListRefs:
         }
         self.check_json(client, pattern, remote, expected_json)
 
-    @pytest.mark.parametrize("remote", [True, False])
+    @pytest.mark.parametrize("remote", ["", "-r=default", "-r=local"])
     @pytest.mark.parametrize("pattern, solution", [("zlib/[*]", ("1.0.0", "2.0.0")),
                                                    ("zlib*/[*]", ("1.0.0", "2.0.0")),
                                                    ("zlib/[<2]", ("1.0.0",)),
@@ -215,7 +255,7 @@ class TestListRefs:
         expected_json = {f"zlib/{v}@user/channel": {} for v in solution}
         self.check_json(client, pattern, remote, expected_json)
 
-    @pytest.mark.parametrize("remote", [True, False])
+    @pytest.mark.parametrize("remote", ["", "-r=default", "-r=local"])
     def test_list_recipe_version_ranges_patterns(self, client, remote):
         pattern = "*/[>1]"
         expected_json = {'zlib/2.0.0@user/channel': {}}
@@ -226,7 +266,7 @@ class TestListRefs:
                          'zlix/1.0.0': {}}
         self.check_json(client, pattern, remote, expected_json)
 
-    @pytest.mark.parametrize("remote", [True, False])
+    @pytest.mark.parametrize("remote", ["", "-r=default", "-r=local"])
     def test_list_recipe_versions_exact(self, client, remote):
         pattern = "zli/1.0.0"
         # by default, when a reference is complete, we show latest recipe revision
@@ -240,7 +280,7 @@ class TestListRefs:
         }
         self.check_json(client, pattern, remote, expected_json)
 
-    @pytest.mark.parametrize("remote", [True, False])
+    @pytest.mark.parametrize("remote", ["", "-r=default", "-r=local"])
     @pytest.mark.parametrize("pattern", ["nomatch", "nomatch*", "nomatch/*"])
     def test_list_recipe_no_match(self, client, pattern, remote):
         if pattern == "nomatch":  # EXACT IS AN ERROR
@@ -255,7 +295,7 @@ class TestListRefs:
             expected_json = {}
         self.check_json(client, pattern, remote, expected_json)
 
-    @pytest.mark.parametrize("remote", [True, False])
+    @pytest.mark.parametrize("remote", ["", "-r=default"])
     @pytest.mark.parametrize("pattern", ["zli/1.0.0#latest",
                                          "zli/1.0.0#b58eeddfe2fd25ac3a105f72836b3360"])
     def test_list_recipe_latest_revision(self, client, remote, pattern):
@@ -278,7 +318,7 @@ class TestListRefs:
         }
         self.check_json(client, pattern, remote, expected_json)
 
-    @pytest.mark.parametrize("remote", [True, False])
+    @pytest.mark.parametrize("remote", ["", "-r=default"])
     def test_list_recipe_all_latest_revision(self, client, remote):
         # we can show the latest revision from several matches, if we add ``#latest``
         pattern = "zlib/*#latest"
@@ -286,14 +326,14 @@ class TestListRefs:
             zlib
               zlib/1.0.0@user/channel
                 revisions
-                  ffd4bc45820ddb320ab224685b9ba3fb (10-11-2023 10:13:13)
+                  ef3acf181d2bcaad95e96ec8aa1effa0 (10-11-2023 10:13:13)
               zlib/2.0.0@user/channel
                 revisions
-                  ffd4bc45820ddb320ab224685b9ba3fb (10-11-2023 10:13:13)
+                  ef3acf181d2bcaad95e96ec8aa1effa0 (10-11-2023 10:13:13)
             """)
         self.check(client, pattern, remote, expected)
 
-    @pytest.mark.parametrize("remote", [True, False])
+    @pytest.mark.parametrize("remote", ["", "-r=default"])
     def test_list_recipe_several_revision(self, client, remote):
         # we can show the latest revision from several matches, if we add ``#latest``
         pattern = "zli/1.0.0#*"
@@ -301,31 +341,31 @@ class TestListRefs:
             zli
               zli/1.0.0
                 revisions
-                  f034dc90894493961d92dd32a9ee3b78 (10-11-2023 10:13:13)
+                  3380cb87a70e7db7e3843ef718092e61 (10-11-2023 10:13:13)
                   b58eeddfe2fd25ac3a105f72836b3360 (10-11-2023 10:13:13)
             """)
         self.check(client, pattern, remote, expected)
 
-    @pytest.mark.parametrize("remote", [True, False])
+    @pytest.mark.parametrize("remote", ["", "-r=default"])
     def test_list_recipe_multiple_revision(self, client, remote):
         pattern = "zli*#*"
         expected = textwrap.dedent(f"""\
             zli
               zli/1.0.0
                 revisions
-                  f034dc90894493961d92dd32a9ee3b78 (10-11-2023 10:13:13)
+                  3380cb87a70e7db7e3843ef718092e61 (10-11-2023 10:13:13)
                   b58eeddfe2fd25ac3a105f72836b3360 (10-11-2023 10:13:13)
             zlib
               zlib/1.0.0@user/channel
                 revisions
-                  ffd4bc45820ddb320ab224685b9ba3fb (10-11-2023 10:13:13)
+                  ef3acf181d2bcaad95e96ec8aa1effa0 (10-11-2023 10:13:13)
               zlib/2.0.0@user/channel
                 revisions
-                  ffd4bc45820ddb320ab224685b9ba3fb (10-11-2023 10:13:13)
+                  ef3acf181d2bcaad95e96ec8aa1effa0 (10-11-2023 10:13:13)
             zlix
               zlix/1.0.0
                 revisions
-                  81f598d1d8648389bb7d0494fffb654e (10-11-2023 10:13:13)
+                  1579357cf0c4f21717fe70eeaaa1420a (10-11-2023 10:13:13)
             """)
         self.check(client, pattern, remote, expected)
 
@@ -405,7 +445,7 @@ class TestListPrefs:
           conf
             conf/1.0
               revisions
-                e4e1703f72ed07c15d73a555ec3a2fa1 (10-11-2023 10:13:13)
+                5b9730d8fae65e378992c6df4c39f9c9 (10-11-2023 10:13:13)
                   packages
                     78c6fa29e8164ce399087ad6067c8f9e2f1c4ad0
                       info
@@ -416,7 +456,7 @@ class TestListPrefs:
         expected_json = {
             "conf/1.0": {
                 "revisions": {
-                    "e4e1703f72ed07c15d73a555ec3a2fa1": {
+                    "5b9730d8fae65e378992c6df4c39f9c9": {
                         "timestamp": "2023-01-10 10:07:33 UTC",
                         "packages": {
                             "78c6fa29e8164ce399087ad6067c8f9e2f1c4ad0": {
@@ -440,7 +480,7 @@ class TestListPrefs:
           test
             test/1.0
               revisions
-                7df6048d3cb39b75618717987fb96453 (10-11-2023 10:13:13)
+                0b4cc540b5fbe5fdd0c46550b146db04 (10-11-2023 10:13:13)
                   packages
                     81d0d9a6851a0208c2bb35fdb34eb156359d939b
                       info
@@ -453,7 +493,7 @@ class TestListPrefs:
         expected_json = {
             "test/1.0": {
                 "revisions": {
-                    "7df6048d3cb39b75618717987fb96453": {
+                    "0b4cc540b5fbe5fdd0c46550b146db04": {
                         "timestamp": "2023-01-10 22:17:13 UTC",
                         "packages": {
                             "81d0d9a6851a0208c2bb35fdb34eb156359d939b": {
@@ -480,7 +520,7 @@ class TestListPrefs:
           zli
             zli/1.0.0
               revisions
-                f034dc90894493961d92dd32a9ee3b78 (2023-01-10 22:19:58 UTC)
+                3380cb87a70e7db7e3843ef718092e61 (2023-01-10 22:19:58 UTC)
                   packages
                     da39a3ee5e6b4b0d3255bfef95601890afd80709
                       info
@@ -632,7 +672,7 @@ def test_list_prefs_query_custom_settings():
     Make sure query works for custom settings
     # https://github.com/conan-io/conan/issues/13071
     """
-    c = TestClient(default_server_user=True)
+    c = TestClient(default_server_user=True, light=True)
     settings = textwrap.dedent("""\
         newsetting:
             value1:
@@ -666,7 +706,7 @@ def test_list_query_options():
     Make sure query works for custom settings
     https://github.com/conan-io/conan/issues/13617
     """
-    c = TestClient(default_server_user=True)
+    c = TestClient(default_server_user=True, light=True)
     c.save({"conanfile.py": GenConanfile("pkg", "1.0").with_option("myoption", [1, 2, 3])})
     c.run("create . -o myoption=1")
     c.run("create . -o myoption=2")
@@ -696,7 +736,7 @@ def test_list_empty_settings():
     """
     If settings are empty, do not crash
     """
-    c = TestClient(default_server_user=True)
+    c = TestClient(default_server_user=True, light=True)
     c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
     c.run("create .")
 
@@ -712,7 +752,7 @@ def test_list_empty_settings():
 
 class TestListNoUserChannel:
     def test_no_user_channel(self):
-        c = TestClient(default_server_user=True)
+        c = TestClient(default_server_user=True, light=True)
         c.save({"zlib.py": GenConanfile("zlib"), })
 
         c.run("create zlib.py --version=1.0.0")
@@ -745,13 +785,15 @@ class TestListRemotes:
           ERROR: Recipe 'whatever/0.1' not found
         other
           ERROR: Recipe 'whatever/0.1' not found
+        local
+          ERROR: Recipe 'whatever/0.1' not found
         """)
 
         client.run('list -c -r="*" whatever/0.1')
         assert expected_output == client.out
 
     def test_fail_if_no_configured_remotes(self):
-        client = TestClient()
+        client = TestClient(light=True)
         client.run('list -r="*" whatever/1.0#123', assert_error=True)
         assert "ERROR: Remotes for pattern '*' can't be found or are disabled" in client.out
 
@@ -766,6 +808,8 @@ class TestListRemotes:
             default
               {output}
             other
+              {output}
+            local
               {output}
             """)
         assert expected_output == client.out
@@ -788,7 +832,7 @@ class TestListHTML:
         """ test that tools.info.package_id:confs works, affecting the package_id and
         can be listed when we are listing packages
         """
-        c = TestClient()
+        c = TestClient(light=True)
         c.save({'lib.py': GenConanfile("lib", "0.1")})
         c.run("create lib.py")
         template_folder = os.path.join(c.cache_folder, 'templates')

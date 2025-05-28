@@ -84,6 +84,13 @@ class TestSearchList:
                 zlib/1.2.11
             """) in client.out
 
+        client.run("search zlib")
+        assert "zlib/1.2.11" in client.out
+
+        client.run("search open*/2.0")
+        assert "openssl/2.0" in client.out
+
+
     def test_list_refs(self, c3i_folder):
         client = TestClient(light=True)
         client.run(f"remote add local '{c3i_folder}'")

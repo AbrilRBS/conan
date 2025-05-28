@@ -195,29 +195,27 @@ class _LocalRecipesIndexLayout:
         return yaml.safe_load(load(config))
 
     def get_recipes_references(self, pattern):
-        name_pattern = pattern.split("/", 1)[0]
         recipes_dir = os.path.join(self._base_folder, "recipes")
         recipes = os.listdir(recipes_dir)
+        name = None
+        try:
+            # If we can parse the pattern as a RecipeReference, we will use it
+            # to skip over bad names
+            pattern_ref = RecipeReference.loads(pattern)
+            name = pattern_ref.name
+        except Exception:
+            raise ConanException(f"Invalid pattern '{pattern}' for local recipes index search")
         recipes.sort()
         ret = []
         excluded = set()
-
-        original_pattern = pattern
-        try:
-            pattern_ref = RecipeReference.loads(pattern)
-            # We don't care about user/channel for now, we'll check for those below,
-            # just add all candidates for now
-            pattern = f"{pattern_ref.name}/{pattern_ref.version}"
-        except:
-            # pattern = pattern
-            pass
 
         loader = ConanFileLoader(None)
         for r in recipes:
             if r.startswith("."):
                 # Skip hidden folders, no recipes should start with a dot
                 continue
-            if not fnmatch(r, name_pattern):
+            if name and not fnmatch(r, name):
+                # If we have a name, skip recipes that don't match it
                 continue
             folder = self._get_base_folder(r)
             config_yml = self._load_config_yml(folder)
@@ -225,10 +223,6 @@ class _LocalRecipesIndexLayout:
                 raise ConanException(f"Corrupted repo, folder {r} without 'config.yml'")
             versions = config_yml["versions"]
             for v in versions:
-                # TODO: Check the search pattern is the same as remotes and cache
-                ref = f"{r}/{v}"
-                if not fnmatch(ref, pattern):
-                    continue
                 subfolder = versions[v]["folder"]
                 # This check can be removed after compatibility with 2.0
                 conanfile = os.path.join(recipes_dir, r, subfolder, "conanfile.py")
@@ -237,16 +231,13 @@ class _LocalRecipesIndexLayout:
                 if "from conans" in conanfile_content or "import conans" in conanfile_content:
                     excluded.add(r)
                     continue
-                ref = RecipeReference.loads(ref)
                 try:
                     recipe = loader.load_basic(conanfile)
-                    ref.user = recipe.user
-                    ref.channel = recipe.channel
+                    ref = RecipeReference(recipe.name, v, recipe.user or "*", recipe.channel or "*")
+                    if ref.matches(pattern, None):
+                        ret.append(ref)
                 except Exception as e:
                     ConanOutput().warning(f"Couldn't load recipe {conanfile}: {e}")
-                if ref.matches(original_pattern, None):
-                    # Check again the pattern with the user/channel
-                    ret.append(ref)
         if excluded:
             ConanOutput().warning(f"Excluding recipes not Conan 2.0 ready: {', '.join(excluded)}")
         return ret
