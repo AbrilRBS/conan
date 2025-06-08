@@ -274,6 +274,13 @@ def test_formatter_redirection_to_file():
     assert f"{c.cache_folder}" in cmd_out
     assert not f"{c.cache_folder}" in c.stdout
 
+    c.run("config home --out-file=new_dir/cmd_out.txt")
+    assert "Creating directory 'new_dir'" in c.out
+    assert "Formatted output saved to 'new_dir/cmd_out.txt'" in c.out
+    cmd_out = c.load("new_dir/cmd_out.txt")
+    assert f"{c.cache_folder}" in cmd_out
+    assert not f"{c.cache_folder}" in c.stdout
+
     c.run("graph info . --format=json --out-file=graph.json")
     assert "Formatted output saved to 'graph.json'" in c.out
     graph = json.loads(c.load("graph.json"))

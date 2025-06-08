@@ -96,6 +96,12 @@ class BaseConanCommand:
                 formatarg, ", ".join(self._help_formatters)))
 
         if out_file:
+            import os
+            directory = os.path.dirname(out_file)
+            abs_directory = os.path.abspath(directory)
+            if directory and not os.path.exists(abs_directory):
+                ConanOutput().info(f"Creating directory '{directory}' for output file")
+                os.makedirs(directory, exist_ok=True)
             with open(out_file, 'w') as f:
                 with redirect_stdout(f):
                     formatter(info)
