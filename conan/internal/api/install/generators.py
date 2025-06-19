@@ -78,8 +78,8 @@ def write_generators(conanfile, hook_manager, home_folder, envs_generation=None)
     _receive_conf(conanfile)
     _receive_generators(conanfile)
 
-    # TODO: Optimize this, so the global generators are not loaded every call to write_generators
-    global_generators = load_cache_generators(HomePaths(home_folder).custom_generators_path)
+    if not hasattr(conanfile._conan_helpers, "global_generators"):
+        conanfile._conan_helpers.global_generators = load_cache_generators(HomePaths(home_folder).custom_generators_path)
     hook_manager.execute("pre_generate", conanfile=conanfile)
 
     if conanfile.generators:
@@ -95,7 +95,7 @@ def write_generators(conanfile, hook_manager, home_folder, envs_generation=None)
     try:
         for generator_name in old_generators:
             if isinstance(generator_name, str):
-                global_generator = global_generators.get(generator_name)
+                global_generator = conanfile._conan_helpers.global_generators.get(generator_name)
                 generator_class = global_generator or _get_generator_class(generator_name)
             else:
                 generator_class = generator_name
