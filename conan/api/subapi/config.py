@@ -42,7 +42,7 @@ class ConfigAPI:
         from conan.internal.api.config.config_installer import configuration_install
         cache_folder = self.conan_api.cache_folder
         requester = self.conan_api.remotes.requester
-        with interprocess_write_lock(self.conan_api):
+        with interprocess_write_lock("conan_config_install"):
             configuration_install(cache_folder, requester, path_or_url, verify_ssl, config_type=config_type, args=args,
                                   source_folder=source_folder, target_folder=target_folder)
             self.conan_api.reinit()
@@ -100,7 +100,7 @@ class ConfigAPI:
         from conan.internal.api.config.config_installer import configuration_install
         cache_folder = self.conan_api.cache_folder
         requester = self.conan_api.remotes.requester
-        with interprocess_write_lock(self.conan_api):
+        with interprocess_write_lock("conan_config_install_pkg"):
             configuration_install(cache_folder, requester, uri=pkg.conanfile.package_folder, verify_ssl=False,
                                   config_type="dir", ignore=["conaninfo.txt", "conanmanifest.txt"])
             # We save the current package full reference in the file for future
@@ -212,7 +212,7 @@ class ConfigAPI:
     def clean(self):
         contents = os.listdir(self.home())
         packages_folder = self.global_conf.get("core.cache:storage_path") or os.path.join(self.home(), "p")
-        with interprocess_write_lock(self.conan_api):
+        with interprocess_write_lock("conan_config_clean"):
             for content in contents:
                 content_path = os.path.join(self.home(), content)
                 if content_path == packages_folder:
