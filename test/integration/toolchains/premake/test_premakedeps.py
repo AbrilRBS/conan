@@ -180,7 +180,7 @@ def test_premakedeps_traits(transitive_headers, transitive_libs):
         assert 't_conandeps["release_x86_64"]["brotli"]["libs"] = {}' in brotli_vars
 
     if transitive_headers:
-        include_path = os.path.join(brotli_layout.package(), "include")
+        include_path = os.path.join(brotli_layout.package(), "include").replace("\\", "/")
         assert f't_conandeps["release_x86_64"]["brotli"]["includedirs"] = {{"{include_path}"}}' in brotli_vars
     else:
         assert 't_conandeps["release_x86_64"]["brotli"]["includedirs"] = {}' in brotli_vars
