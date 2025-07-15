@@ -112,7 +112,6 @@ class _PremakeTemplate(object):
         self.includedirs = _format_paths(dep_cpp_info.includedirs if with_headers else [])
         with_libs = req and req.libs
         self.libs = _format_flags(dep_cpp_info.libs if with_libs else [])
-        print(req, ":", with_libs, '=>', self.libs)
         with_run = req and req.run
         self.bindirs = _format_paths(dep_cpp_info.bindirs if with_run else [])
         self.system_libs = _format_flags(dep_cpp_info.system_libs)
@@ -215,7 +214,6 @@ class PremakeDeps:
         dep_names = []
         config_sets = []
         for require, dep in full_req:
-            print(dep, "->", require)
             dep_name = require.ref.name
             dep_names.append(dep_name)
 
@@ -279,8 +277,6 @@ class PremakeDeps:
             PREMAKE_TEMPLATE_ROOT_GLOBAL
         ])
 
-
-        print("xxx", dep_names)
         # Output configuration file for the current build configuration
         self._output_lua_file(PREMAKE_CONFIG_FILE.format(config=conf_name), [
             PREMAKE_TEMPLATE_CONFIG.format(
