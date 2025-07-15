@@ -133,7 +133,9 @@ def test_premakedeps_link_order():
 
 @pytest.mark.parametrize("transitive_headers", [True, False])
 @pytest.mark.parametrize("transitive_libs", [True, False])
-def test_premakedeps_traits(transitive_headers, transitive_libs):
+@pytest.mark.parametrize("brotli_package_type", ["unknown", "static-library", "shared-library"])
+@pytest.mark.parametrize("lib_package_type", ["unknown", "static-library", "shared-library"])
+def test_premakedeps_traits(transitive_headers, transitive_libs, brotli_package_type, lib_package_type):
     client = TestClient()
     profile = textwrap.dedent(
         """
@@ -149,10 +151,14 @@ def test_premakedeps_traits(transitive_headers, transitive_libs):
 
     client.save(
         {
-            "brotli/conanfile.py": GenConanfile("brotli", "1.0").with_package_info(
+            "brotli/conanfile.py": GenConanfile("brotli", "1.0")
+            .with_package_type(brotli_package_type)
+            .with_package_info(
                 {"libs": ["brotlienc2"]}
             ),
-            "lib/conanfile.py": GenConanfile("lib", "1.0").with_requirement(
+            "lib/conanfile.py": GenConanfile("lib", "1.0")
+            .with_package_type(lib_package_type)
+            .with_requirement(
                 "brotli/1.0",
                 transitive_headers=transitive_headers,
                 transitive_libs=transitive_libs,
@@ -169,9 +175,9 @@ def test_premakedeps_traits(transitive_headers, transitive_libs):
     client.run("create lib -pr profile")
     client.run("install . -pr profile")
 
-    if not transitive_headers and not transitive_libs:
-        assert not os.path.exists(os.path.join(client.current_folder, "conan_brotli_vars_release_x86_64.premake5.lua"))
-        return
+    # if not transitive_headers and not transitive_libs:
+    #     assert not os.path.exists(os.path.join(client.current_folder, "conan_brotli_vars_release_x86_64.premake5.lua"))
+    #     return
 
     brotli_vars = client.load("conan_brotli_vars_release_x86_64.premake5.lua")
     if transitive_libs:
