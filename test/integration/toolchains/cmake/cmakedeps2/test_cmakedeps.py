@@ -40,6 +40,38 @@ def test_cmakedeps_direct_deps_paths():
     assert re.search(r"list\(PREPEND CMAKE_FRAMEWORK_PATH \".*/myframework\"", cmake_paths)
 
 
+def test_cmakedeps_direct_deps_paths_possible_names():
+    c = TestClient()
+    conanfile = textwrap.dedent("""
+        import os
+        from conan.tools.files import copy
+        from conan import ConanFile
+        class TestConan(ConanFile):
+            name = "lib"
+            version = "1.0"
+            def package_info(self):
+                self.cpp_info.includedirs = ["myincludes"]
+                self.cpp_info.libdirs = ["mylib"]
+                self.cpp_info.frameworkdirs = ["myframework"]
+                self.cpp_info.set_property("cmake_possible_names", ["MyLib"])
+    """)
+    c.save({"conanfile.py": conanfile})
+    c.run("create .")
+    conanfile = textwrap.dedent(f"""
+        from conan import ConanFile
+        from conan.tools.cmake import CMake
+        class PkgConan(ConanFile):
+            requires = "lib/1.0"
+            settings = "os", "arch", "compiler", "build_type"
+            generators = "CMakeDeps"
+    """)
+    c.save({"conanfile.py": conanfile}, clean_first=True)
+    c.run(f"install . -c tools.cmake.cmakedeps:new={new_value}")
+    cmake_paths = c.load("conan_cmakedeps_paths.cmake")
+    assert "set(lib_DIR" in cmake_paths
+    assert "set(MyLib_DIR" in cmake_paths
+
+
 def test_cmakedeps_transitive_paths():
     c = TestClient()
     conanfile = textwrap.dedent("""

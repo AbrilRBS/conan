@@ -237,6 +237,8 @@ class _PathGenerator:
             cmake_find_mode = cmake_find_mode.lower()
 
             pkg_name = self._cmakedeps.get_cmake_filename(dep)
+            pkg_possible_names = [pkg_name] + (self._cmakedeps.get_property("cmake_possible_names", dep,
+                                                                           check_type=list) or [])
             # https://cmake.org/cmake/help/v3.22/guide/using-dependencies/index.html
             if cmake_find_mode == FIND_MODE_NONE:
                 try:
@@ -250,13 +252,16 @@ class _PathGenerator:
                     f = self._cmakedeps.get_cmake_filename(dep)
                     for filename in (f"{f}-config.cmake", f"{f}Config.cmake"):
                         if os.path.isfile(os.path.join(pkg_folder, filename)):
-                            pkg_paths[pkg_name] = relativize_path(pkg_folder, self._conanfile,
+                            rel_path = relativize_path(pkg_folder, self._conanfile,
                                                                   "${CMAKE_CURRENT_LIST_DIR}")
+                            for possible_name in pkg_possible_names:
+                                pkg_paths[possible_name] = rel_path
                 continue
 
             # If CMakeDeps generated, the folder is this one
             # content.append(f'set({pkg_name}_ROOT "{gen_folder}")')
-            pkg_paths[pkg_name] = "${CMAKE_CURRENT_LIST_DIR}"
+            for possible_name in pkg_possible_names:
+                pkg_paths[possible_name] = "${CMAKE_CURRENT_LIST_DIR}"
 
         # CMAKE_PROGRAM_PATH | CMAKE_LIBRARY_PATH | CMAKE_INCLUDE_PATH
         cmake_program_path = self._get_cmake_paths([(req, dep) for req, dep in all_reqs if req.direct], "bindirs")
