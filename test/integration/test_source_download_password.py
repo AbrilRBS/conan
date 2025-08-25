@@ -115,8 +115,69 @@ def test_blocked_malicius_tgz():
         mock_download.side_effect = download_zip
         client.run("create . -c tools.files.unzip:filter=data", assert_error=True)
         assert "AbsoluteLinkError" in client.out
+        client.save({"conanfile.py": conan_file.format("extract_filter='data'")})
+        client.run("create . -c tools.files.unzip:filter=data", assert_error=True)
+        assert "AbsoluteLinkError" in client.out
         client.save({"conanfile.py": conan_file.format("extract_filter='fully_trusted'")})
         client.run("create . ")  # Doesn't fail now
         # user conf has precedence
         client.save({"conanfile.py": conan_file.format("extract_filter='data'")})
         client.run("create . -c tools.files.unzip:filter=fully_trusted")  # Doesn't fail now
+
+
+@pytest.mark.skipif(sys.version_info.minor < 12 or platform.system() == "Windows",
+                    reason="Extraction filters only Python 3.12, using symlinks (not Windows)")
+def test_callable_filter():
+    folder = temp_folder()
+    fn = "myfile.txt"
+    f = os.path.join(folder, fn)
+    save(f, "The contents")
+    sn = "docs/mydocs.txt"
+    s = os.path.join(folder, sn)
+    save(s, "The docs")
+    tgz_path = compress_files({fn: f, sn: s}, "myfiles.tgz", dest_dir=folder)
+    os.remove(f)
+
+    conan_file = textwrap.dedent("""
+        from conan import ConanFile
+        from conan.tools.files import get
+        class Pkg(ConanFile):
+            name = "pkg"
+            version = "0.1"
+            def source(self):
+                conanfile = self
+                import tarfile
+                def _my_filter(tarinfo, path):
+                    filename = tarinfo.name
+
+                    # I could choose to default to one and call it
+                    tarinfo = tarfile.data_filter(tarinfo, path)
+                    # Or let the user choose from the built in conf
+                    filter = conanfile.conf.get("tools.files.unzip:filter", check_type=str, default="data")
+                    f = getattr(tarfile, f"{filter}_filter", None) if filter else None
+                    if f:
+                        tarinfo = f(tarinfo, path)
+                    # And now do my own checks
+                    print(tarinfo.name)
+                    if tarinfo.name.startswith("docs/"):
+                        # Don't extract 150MB of docs?
+                        print(f"Skipping {tarinfo.name}")
+                        return None
+                    return tarinfo
+
+                get(self, "http://fake_url/myfiles.tgz", extract_filter=_my_filter)
+            """)
+    client = TestClient()
+    client.save({"conanfile.py": conan_file})
+
+    with mock.patch("conan.tools.files.files.download") as mock_download:
+        def download_zip(*args, **kwargs):  # noqa
+            copy(tgz_path, os.getcwd())
+        mock_download.side_effect = download_zip
+        client.run("create .")
+        assert "Skipping docs/mydocs.txt" in client.out
+
+        created_layout = client.created_layout()
+        build_contents = os.listdir(created_layout.build())
+        assert "myfile.txt" in build_contents
+        assert "docs" not in build_contents

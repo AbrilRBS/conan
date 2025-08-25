@@ -437,7 +437,10 @@ def untargz(filename, destination=".", pattern=None, strip_root=False, extract_f
     # NOT EXPOSED at `conan.tools.files` but used in tests
     import tarfile
     with tarfile.TarFile.open(filename, mode='r:*') as tarredgzippedFile:
-        f = getattr(tarfile, f"{extract_filter}_filter", None) if extract_filter else None
+        if callable(extract_filter):
+            f = extract_filter
+        else:
+            f = getattr(tarfile, f"{extract_filter}_filter", None) if extract_filter else None
         tarredgzippedFile.extraction_filter = f or (lambda member_, _: member_)
         # https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation?tabs=registry
         # File I/O functions in the Windows API convert "/" to "\" as part of converting
