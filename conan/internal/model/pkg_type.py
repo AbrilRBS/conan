@@ -10,6 +10,7 @@ class PackageType(Enum):
     HEADER = "header-library"
     BUILD_SCRIPTS = "build-scripts"
     APP = "application"
+    APPLICATION_AND_LIBRARY = "application-and-library"
     PYTHON = "python-require"
     CONF = "configuration"
     UNKNOWN = "unknown"
@@ -53,6 +54,11 @@ class PackageType(Enum):
             except ValueError:
                 raise ConanException(f"{conanfile}: Invalid package type '{conanfile_type}'. "
                                      f"Valid types: {[i.value for i in PackageType]}")
+            if conanfile_type is PackageType.APPLICATION_AND_LIBRARY:
+                if conanfile.context == "host":
+                    conanfile_type = PackageType.LIBRARY
+                else:
+                    conanfile_type = PackageType.APP
             if conanfile_type is PackageType.LIBRARY:
                 conanfile_type = deduce_from_options()
                 if conanfile_type is PackageType.UNKNOWN:
