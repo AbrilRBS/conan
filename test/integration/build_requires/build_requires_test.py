@@ -529,6 +529,25 @@ class TestBuildTrackHost:
         tc.run("create app", assert_error=assert_error)
         assert assert_msg in tc.out
 
+    @pytest.mark.parametrize("host_version, assert_error, assert_msg", [
+        ("libgettext>", True, "gettext/0.2#d9f9eaeac9b6e403b271f04e04149df2"),
+        ("libgettext@user>", True, "gettext/0.2#d9f9eaeac9b6e403b271f04e04149df2"),
+        ("libgettext/*@user>", True, "gettext/0.2#d9f9eaeac9b6e403b271f04e04149df2"),
+        ("libgettext/*@user/channel>", False, "gettext/0.2#d9f9eaeac9b6e403b271f04e04149df2"),
+    ])
+    def test_host_version_different_ref_user_channel(self, host_version, assert_error, assert_msg):
+        tc = TestClient(light=True)
+        tc.save({"gettext/conanfile.py": GenConanfile("gettext"),
+                 "libgettext/conanfile.py": GenConanfile("libgettext"),
+                 "app/conanfile.py": GenConanfile("app", "1.0").with_requires("libgettext/[>0.1]@user/channel")
+                .with_tool_requirement(f"gettext/<host_version:{host_version}")})
+        tc.run("create libgettext --version=0.2 --user=user --channel=channel")
+        tc.run("create gettext --version=0.1 --build-require")
+        tc.run("create gettext --version=0.2 --build-require")
+
+        tc.run("create app", assert_error=assert_error)
+        assert assert_msg in tc.out
+
     @pytest.mark.parametrize("requires_tag,tool_requires_tag,fails", [
         ("user/channel", "user/channel", False),
         ("", "user/channel", True),
