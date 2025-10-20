@@ -227,13 +227,24 @@ def _generate_aggregated_env(conanfile):
                 save(os.path.join(conanfile.generators_folder, "deactivate_{}".format(filename)),
                      sh_content(deactivates(shs)))
         if bats:
-            def bat_content(files):
-                return "\r\n".join(["@echo off"] + ['call "{}"'.format(b) for b in files])
+            import tempfile
+            deactivate_temp_folder = tempfile.mkdtemp(prefix="conan_deactivate_")
+            # Let everyone use it
+            os.chmod(deactivate_temp_folder, 0o777)
+
+            def bat_content(files, is_deactivate=False):
+                if is_deactivate:
+                    # Remove %conandeactivatetempfolder% from PATH to avoid nesting
+                    extra = f'set "PATH=%PATH:{deactivate_temp_folder};=%"\r\n'
+                else:
+                    extra = (f"set conandeactivatetempfolder={deactivate_temp_folder}\r\n"
+                             f'set "PATH=%conandeactivatetempfolder%;%PATH%"')
+                return extra + "\r\n".join(["@echo off"] + ['call "{}"'.format(b) for b in files])
             filename = "conan{}.bat".format(group)
             generated.append(filename)
             save(os.path.join(conanfile.generators_folder, filename), bat_content(bats))
-            save(os.path.join(conanfile.generators_folder, "deactivate_{}".format(filename)),
-                 bat_content(deactivates(bats)))
+            save(os.path.join(deactivate_temp_folder, "deactivate_{}".format(filename)),
+                 bat_content(deactivates(bats), is_deactivate=True))
         if ps1s:
             def ps1_content(files):
                 aggregated_calls = "\r\n".join(['& "{}"'.format(b) for b in files])
