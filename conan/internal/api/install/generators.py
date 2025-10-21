@@ -1,5 +1,6 @@
 import inspect
 import os
+import textwrap
 import traceback
 import importlib
 
@@ -182,10 +183,6 @@ def _generate_aggregated_env(conanfile):
             result.append(os.path.join(folder, "deactivate_{}".format(f)))
         return result
 
-    def deactivate_function_names(filenames):
-        return [os.path.splitext(os.path.basename(s))[0].replace("-", "_")
-                for s in reversed(filenames)]
-
     use_deactivate_function = conanfile.conf.get("tools.env:deactivate_function", default=False,
                                                  check_type=bool)
     generated = []
@@ -212,7 +209,7 @@ def _generate_aggregated_env(conanfile):
                 if use_deactivate_function:
                     content = aggregated_calls + "\n"
                     content += f"deactivate_conan{group}() {{\n"
-                    for deactivate_name in deactivate_function_names(shs):
+                    for deactivate_name in _deactivate_function_names(shs):
                         content += f"    deactivate_{deactivate_name}\n"
                     content += f"    unset -f deactivate_conan{group}\n"
                     content += "}\n"
@@ -227,31 +224,26 @@ def _generate_aggregated_env(conanfile):
                 save(os.path.join(conanfile.generators_folder, "deactivate_{}".format(filename)),
                      sh_content(deactivates(shs)))
         if bats:
-            import tempfile
-            deactivate_temp_folder = tempfile.mkdtemp(prefix="conan_deactivate_")
-            # Let everyone use it
-            os.chmod(deactivate_temp_folder, 0o777)
+            def bat_content(files):
+                aggregated_calls = "\r\n".join(["@echo off"] + ['call "{}"'.format(b) for b in files])
+                if use_deactivate_function:
+                    aggregated_calls += "\r\n" + _bat_global_deactivate_content(files, group) + "\r\n"
+                return aggregated_calls
 
-            def bat_content(files, is_deactivate=False):
-                if is_deactivate:
-                    # Remove %conandeactivatetempfolder% from PATH to avoid nesting
-                    extra = f'set "PATH=%PATH:{deactivate_temp_folder};=%"\r\n'
-                else:
-                    extra = (f"set conandeactivatetempfolder={deactivate_temp_folder}\r\n"
-                             f'set "PATH=%conandeactivatetempfolder%;%PATH%"')
-                return extra + "\r\n".join(["@echo off"] + ['call "{}"'.format(b) for b in files])
             filename = "conan{}.bat".format(group)
             generated.append(filename)
             save(os.path.join(conanfile.generators_folder, filename), bat_content(bats))
-            save(os.path.join(deactivate_temp_folder, "deactivate_{}".format(filename)),
-                 bat_content(deactivates(bats), is_deactivate=True))
+            if not use_deactivate_function:
+                save(os.path.join(conanfile.generators_folder, "deactivate_{}".format(filename)),
+                     bat_content(deactivates(bats)))
+
         if ps1s:
             def ps1_content(files):
                 aggregated_calls = "\r\n".join(['& "{}"'.format(b) for b in files])
                 if use_deactivate_function:
                     content = aggregated_calls + "\n"
                     content += f"function global:deactivate_conan{group} {{\n"
-                    for deactivate_name in deactivate_function_names(ps1s):
+                    for deactivate_name in _deactivate_function_names(ps1s):
                         content += f"    deactivate_{deactivate_name}\n"
                     content += (f"    Remove-Item -Path function:deactivate_conan{group} "
                                 f"-ErrorAction SilentlyContinue")
@@ -268,6 +260,48 @@ def _generate_aggregated_env(conanfile):
     if generated:
         conanfile.output.highlight("Generating aggregated env files")
         conanfile.output.info(f"Generated aggregated env files: {generated}")
+
+def _deactivate_function_names(filenames):
+    return [os.path.splitext(os.path.basename(s))[0].replace("-", "_")
+            for s in reversed(filenames)]
+
+def _bat_global_deactivate_content(files, group):
+    macros = ""
+    for file in _deactivate_function_names(files):
+        macros += f"deactivate_{file} "
+
+    return textwrap.dedent(f"""\
+        setlocal enabledelayedexpansion
+
+        rem === Macros to combine ===
+        set macros_to_combine={macros}
+        set combined_macro=deactivate_conan{group}
+
+        rem === Build combined macro ===
+        set "combined_cmd="
+
+        for %%M in (%macros_to_combine%) do (
+            for /f "delims=" %%L in ('doskey /macros ^| findstr /b "%%M="') do (
+                set "line=%%L"
+                rem Remove "macro_name=" prefix
+                call set "line=%%line:*%%M==%%%"
+                if defined combined_cmd (
+                    set "combined_cmd=!combined_cmd!$T!line!"
+                ) else (
+                    set "combined_cmd=!line!"
+                )
+            )
+        )
+
+        rem === Add self-removal ===
+        set "combined_cmd=!combined_cmd!$Tdoskey %combined_macro%="
+
+        rem === Define the combined macro ===
+        doskey %combined_macro%=!combined_cmd!
+        endlocal
+
+        echo Environment activated. Run "deactivate_conan{group}" to restore.
+        """)
 
 
 def relativize_paths(conanfile, placeholder):
