@@ -134,6 +134,15 @@ def config_show(conan_api, parser, subparser, *args):
     return conan_api.config.show(args.pattern)
 
 
+@conan_subcommand(formatters={"text": cli_out_write, "json": default_json_formatter})
+def config_settings_yml(conan_api, parser, subparser, *args):
+    """
+    Show the computed valid settings scheme according to the settings.yml and user_settings.yml files
+    """
+    parser.parse_args(*args)
+    return conan_api.config.settings_yml.possible_values()
+
+
 @conan_subcommand()
 def config_clean(conan_api, parser, subparser, *args):  # noqa
     """
