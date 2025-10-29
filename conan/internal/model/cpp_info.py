@@ -812,7 +812,7 @@ class CppInfo:
             if direct_dependencies and comps:
                 msg = (f"{conanfile}: package_info(): There are direct dependencies, "
                        "but no '(cpp_info/components).requires' to them.")
-                raise ConanException(msg)
+                conanfile.output.warning(msg)
             return
 
         for e in external:
