@@ -231,6 +231,10 @@ class Options:
                         continue  # defining a None value means same as not giving value
                     k = str(k).strip()
                     v = str(v).strip()
+                    if "[" in k or "]" in k:
+                        raise ConanException(
+                            "Version ranges are not allowed in options package patterns: "
+                            f"'{k}={v}'")
                     tokens = k.split(":", 1)
                     if len(tokens) == 2:
                         package, option = tokens

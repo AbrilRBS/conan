@@ -150,6 +150,11 @@ equal/1.0.0@user/testing:opt=a=b
             assert "conanfile.py: shared=True" in client.out
             assert "liba/0.1@danimtb/testing: shared=True" in client.out
 
+    def test_option_pattern_version_range_errors(self):
+        tc = TestClient(light=True)
+        tc.run("graph info --requires=foo/1.0 -o'foo/[>=1.0]:shared=True'", assert_error=True)
+        assert "Version ranges are not allowed in options package patterns" in tc.out
+
     def test_define_nested_option_not_freeze(self):
         c = TestClient()
         conanfile = textwrap.dedent("""
