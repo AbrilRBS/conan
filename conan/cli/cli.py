@@ -136,7 +136,7 @@ class Cli:
         Prints a summary of all commands.
         """
         max_len = max((len(c) for c in self._commands)) + 1
-        line_format = '{{: <{}}}'.format(max_len)
+        line_format = ' {{: <{}}}'.format(max_len)
 
         for group_name, comm_names in sorted(self._groups.items()):
             cli_out_write("\n" + group_name + " commands", Color.BRIGHT_MAGENTA)
