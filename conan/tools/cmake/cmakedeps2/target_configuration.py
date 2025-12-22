@@ -42,6 +42,16 @@ class TargetConfigurationTemplate2:
         build = "Build" if self._conanfile.context == CONTEXT_BUILD else ""
         return f"{f}-Targets{build}-{config}.cmake"
 
+    def _is_whole_archive_link(self, dep, comp_name):
+        link_whole = (dep.package_type is PackageType.STATIC and
+                      self._cmakedeps.get_property("cmake_whole_archive_link", dep,
+                                                   comp_name=comp_name,
+                                                   check_type=bool))
+        # TODO:
+        #  https://cmake.org/cmake/help/v4.2/manual/cmake-generator-expressions.7.html#genex:LINK_LIBRARY
+        #  it only works for some cases, let the recipes care about it?
+        return link_whole
+
     def _requires(self, info, components):
         result = {}
         requires = info.parsed_requires()
@@ -58,7 +68,8 @@ class TargetConfigurationTemplate2:
                 dep_target = self._cmakedeps.get_property("cmake_target_name", d)
                 dep_target = dep_target or f"{d.ref.name}::{d.ref.name}"
                 link = not (pkg_type is PackageType.SHARED and d.package_type is PackageType.SHARED)
-                result[dep_target] = link
+                result[dep_target] = {"link": link,
+                                      "is_whole_archive_link": self._is_whole_archive_link(d, None)}
             return result
 
         for required_pkg, required_comp in requires:
@@ -70,7 +81,10 @@ class TargetConfigurationTemplate2:
                 dep_target = dep_target or f"{pkg_name}::{required_comp}"
                 link = not (pkg_type is PackageType.SHARED and
                             dep_comp.type is PackageType.SHARED)
-                result[dep_target] = link
+                result[dep_target] = {
+                    "link": link,
+                    "is_whole_archive_link": self._is_whole_archive_link(self._conanfile, dep_comp)
+                }
             else:  # Different package
                 try:
                     dep = transitive_reqs[required_pkg]
@@ -99,11 +113,12 @@ class TargetConfigurationTemplate2:
                         default_target = f"{required_pkg}::{required_comp}"
                         link = not (pkg_type is PackageType.SHARED and
                                     dep_comp.type is PackageType.SHARED)
-
+                    is_whole_archive_link = self._is_whole_archive_link(dep, comp)
                     dep_target = self._cmakedeps.get_property("cmake_target_name", dep, comp)
                     dep_target = dep_target or default_target
 
-                    result[dep_target] = link
+                    result[dep_target] = {"link": link,
+                                          "is_whole_archive_link": is_whole_archive_link}
         return result
 
     @property
@@ -407,13 +422,19 @@ class TargetConfigurationTemplate2:
 
         {% if lib_info.get("requires") %}
         # Information of transitive dependencies
-        {% for require_target, link in lib_info["requires"].items() %}
+        {% for require_target, link_info in lib_info["requires"].items() %}
+        {% set link = link_info["link"] %}
+        {% set is_whole_archive_link = link_info["is_whole_archive_link"] %}
         # Requirement {{require_target}} => Full link: {{link}}
-
         {% if link %}
         # set property allows to append, and lib_info[requires] will iterate
+        {% if is_whole_archive_link %}
+        set_property(TARGET {{lib}} APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+                     "$<LINK_LIBRARY:WHOLE_ARCHIVE,{{config_wrapper(config, require_target)}}>")
+        {% else %}
         set_property(TARGET {{lib}} APPEND PROPERTY INTERFACE_LINK_LIBRARIES
                      "{{config_wrapper(config, require_target)}}")
+        {% endif %}
         {% else %}
         if(${CMAKE_VERSION} VERSION_LESS "3.27")
             message(FATAL_ERROR "The 'CMakeToolchain' generator only works with CMake >= 3.27")

@@ -664,3 +664,60 @@ def test_target_defines_only():
     target = client.load("pkg-Targets-release.cmake")
     assert 'add_library(pkg::base INTERFACE IMPORTED)' in target
     assert "# Requirement pkg::base => Full link: True" in target
+
+
+class TestWholeLinkArchiveProperty:
+    def test_whole_link_archive_property_same_package(self):
+        tc = TestClient()
+        tc.save({"conanfile.py": textwrap.dedent("""
+        from conan import ConanFile
+        from conan.tools.files import save
+        import os
+        class Pkg(ConanFile):
+            name = "pkg"
+            version = "1.0"
+            settings = "os", "compiler", "build_type", "arch"
+            def package(self):
+                save(self, os.path.join(self.package_folder, "lib", "mycompa.a"), "")
+                save(self, os.path.join(self.package_folder, "lib", "mycompb.a"), "")
+
+            def package_info(self):
+                self.cpp_info.components["mycompa"].libs = ["mycompa"]
+                self.cpp_info.components["mycompa"].set_property("cmake_whole_link_archive", True)
+                self.cpp_info.components["mycompb"].libs = ["mycompb"]
+                self.cpp_info.components["mycompb"].requires.append("mycompa")
+
+        """)})
+
+    def test_whole_link_archive_property_global_cppinfo(self):
+        tc = TestClient()
+        tc.save({"pkg/conanfile.py": textwrap.dedent("""
+        from conan import ConanFile
+        from conan.tools.files import save
+        import os
+        class Pkg(ConanFile):
+            name = "pkg"
+            version = "1.0"
+            settings = "os", "compiler", "build_type", "arch"
+            def package(self):
+                save(self, os.path.join(self.package_folder, "lib", "mycompa.a"), "")
+
+            def package_info(self):
+                self.cpp_info.libs = ["mycompa"]
+                self.cpp_info.set_property("cmake_whole_archive_link", True)
+
+        """),
+                 "consumer/conanfile.py": textwrap.dedent("""
+                    from conan import ConanFile
+                    class Consumer(ConanFile):
+                        name = "consumer"
+                        version = "1.0"
+                        requires = "pkg/1.0"
+                        settings = "os", "compiler", "build_type", "arch"
+                    """)})
+
+        tc.run("create pkg")
+        tc.run("create consumer")
+        tc.run(f"install --requires=consumer/1.0 -g CMakeDeps -c tools.cmake.cmakedeps:new={new_value}")
+        targets_data = tc.load('consumer-Targets-release.cmake')
+        assert "LINK_LIBRARY:WHOLE_ARCHIVE" in targets_data
