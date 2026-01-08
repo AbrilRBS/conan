@@ -416,7 +416,7 @@ class ListPattern:
     @property
     def search_ref(self):
         vrange = self._version_range
-        if vrange:
+        if vrange or self.version in ["!latest", "~latest", "!$", "~$", "$"]:
             return str(RecipeReference(self.name, "*", self.user, self.channel))
         if "*" in self.ref or not self.version or (self.package_id is None and self.rrev is None):
             return self.ref
@@ -430,6 +430,10 @@ class ListPattern:
         vrange = self._version_range
         if vrange:
             refs = [r for r in refs if vrange.contains(r.version, resolve_prereleases)]
+        elif self.version in ["!latest", "~latest", "!$", "~$"]:
+            refs = refs[:-1]
+        elif self.version == "$":
+            refs = [refs[-1]] if refs else []
         return refs
 
     @property
