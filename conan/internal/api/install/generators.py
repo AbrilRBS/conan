@@ -183,8 +183,11 @@ def _generate_aggregated_env(conanfile):
             result.append(os.path.join(folder, "deactivate_{}".format(f)))
         return result
 
-    use_deactivate_function = conanfile.conf.get("tools.env:deactivate_function", default=False,
-                                                 check_type=bool)
+    def deactivate_function_names(filenames):
+        return [os.path.splitext(os.path.basename(s))[0].replace("-", "_")
+                for s in reversed(filenames)]
+
+    deactivation_mode = conanfile.conf.get("tools.env:deactivation_mode", default=None, check_type=str)
     generated = []
     for group, env_scripts in conanfile.env_scripts.items():
         subsystem = deduce_subsystem(conanfile, group)
@@ -205,61 +208,53 @@ def _generate_aggregated_env(conanfile):
                 ps1s.append("$PSScriptRoot/"+path)
         if shs:
             def sh_content(files):
-                aggregated_calls = ". " + " && . ".join('"{}"'.format(s) for s in files)
-                if use_deactivate_function:
-                    content = aggregated_calls + "\n"
-                    content += f"deactivate_conan{group}() {{\n"
-                    for deactivate_name in _deactivate_function_names(shs):
+                content = ". " + " && . ".join('"{}"'.format(s) for s in files)
+                if deactivation_mode == "function":
+                    content += f"\n\ndeactivate_conan{group}() {{\n"
+                    for deactivate_name in deactivate_function_names(shs):
                         content += f"    deactivate_{deactivate_name}\n"
-                    content += f"    unset -f deactivate_conan{group}\n"
-                    content += "}\n"
-                    return content
-                else:
-                    return aggregated_calls
+                    content += f"    unset -f deactivate_conan{group}\n}}\n"
+                return content
             filename = "conan{}.sh".format(group)
-
             generated.append(filename)
             save(os.path.join(conanfile.generators_folder, filename), sh_content(shs))
-            if not use_deactivate_function:
+            if not deactivation_mode:
                 save(os.path.join(conanfile.generators_folder, "deactivate_{}".format(filename)),
                      sh_content(deactivates(shs)))
         if bats:
             def bat_content(files):
-                aggregated_calls = "\r\n".join(["@echo off"] + ['call "{}"'.format(b) for b in files])
-                if use_deactivate_function:
-                    aggregated_calls += "\r\n" + _bat_global_deactivate_content(files, group) + "\r\n"
-                return aggregated_calls
+                content = "\r\n".join(["@echo off"] + ['call "{}"'.format(b) for b in files])
+                if deactivation_mode == "function":
+                    content += "\r\n" + _bat_global_deactivate_content(files, group) + "\r\n"
+                return content
 
             filename = "conan{}.bat".format(group)
             generated.append(filename)
             save(os.path.join(conanfile.generators_folder, filename), bat_content(bats))
-            if not use_deactivate_function:
+            if not deactivation_mode:
                 save(os.path.join(conanfile.generators_folder, "deactivate_{}".format(filename)),
                      bat_content(deactivates(bats)))
-
         if ps1s:
             def ps1_content(files):
-                aggregated_calls = "\r\n".join(['& "{}"'.format(b) for b in files])
-                if use_deactivate_function:
-                    content = aggregated_calls + "\n"
-                    content += f"function global:deactivate_conan{group} {{\n"
-                    for deactivate_name in _deactivate_function_names(ps1s):
+                content = "\r\n".join(['& "{}"'.format(b) for b in files])
+                if deactivation_mode == "function":
+                    content += f"\n\nfunction global:deactivate_conan{group} {{\n"
+                    for deactivate_name in deactivate_function_names(ps1s):
                         content += f"    deactivate_{deactivate_name}\n"
                     content += (f"    Remove-Item -Path function:deactivate_conan{group} "
-                                f"-ErrorAction SilentlyContinue")
-                    content += "}\n"
-                    return content
-                else:
-                    return aggregated_calls
+                                "-ErrorAction SilentlyContinue"
+                                "\n}\n")
+                return content
             filename = "conan{}.ps1".format(group)
             generated.append(filename)
             save(os.path.join(conanfile.generators_folder, filename), ps1_content(ps1s))
-            if not use_deactivate_function:
+            if not deactivation_mode:
                 save(os.path.join(conanfile.generators_folder, "deactivate_{}".format(filename)),
                      ps1_content(deactivates(ps1s)))
     if generated:
         conanfile.output.highlight("Generating aggregated env files")
         conanfile.output.info(f"Generated aggregated env files: {generated}")
+
 
 def _deactivate_function_names(filenames):
     return [os.path.splitext(os.path.basename(s))[0].replace("-", "_")

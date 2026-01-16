@@ -95,6 +95,7 @@ class Cli:
             if command_wrapper.doc:
                 name = f"{package}:{command_wrapper.name}" if package else command_wrapper.name
                 self._commands[name] = command_wrapper
+                command_wrapper._prog = name  # set the program name with possible package, if any
                 # Avoiding duplicated command help messages
                 if name not in self._groups[command_wrapper.group]:
                     self._groups[command_wrapper.group].append(name)
@@ -217,8 +218,7 @@ class Cli:
     @staticmethod
     def exception_exit_error(exception):
         output = ConanOutput()
-        if exception is None:
-            return SUCCESS
+        assert exception is not None
         if isinstance(exception, ConanInvalidConfiguration):
             output.error(exception, error_type="exception")
             return ERROR_INVALID_CONFIGURATION

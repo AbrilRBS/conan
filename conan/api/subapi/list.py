@@ -1,4 +1,3 @@
-import copy
 import os
 from collections import OrderedDict
 from typing import Dict
@@ -57,9 +56,9 @@ class ListAPI:
         assert ref.revision is None, "latest_recipe_revision: ref already have a revision"
         app = ConanBasicApp(self._conan_api)
         if remote:
-            ret = app.remote_manager.get_latest_recipe_reference(ref, remote=remote)
+            ret = app.remote_manager.get_latest_recipe_revision(ref, remote=remote)
         else:
-            ret = app.cache.get_latest_recipe_reference(ref)
+            ret = app.cache.get_latest_recipe_revision(ref)
 
         return ret
 
@@ -69,9 +68,9 @@ class ListAPI:
         assert ref.revision is None, "recipe_revisions: ref already have a revision"
         app = ConanBasicApp(self._conan_api)
         if remote:
-            results = app.remote_manager.get_recipe_revisions_references(ref, remote=remote)
+            results = app.remote_manager.get_recipe_revisions(ref, remote=remote)
         else:
-            results = app.cache.get_recipe_revisions_references(ref)
+            results = app.cache.get_recipe_revisions(ref)
 
         return results
 
@@ -83,9 +82,9 @@ class ListAPI:
         assert pref.package_id is not None, "package_id must be defined"
         app = ConanBasicApp(self._conan_api)
         if remote:
-            ret = app.remote_manager.get_latest_package_reference(pref, remote=remote)
+            ret = app.remote_manager.get_latest_package_revision(pref, remote=remote)
         else:
-            ret = app.cache.get_latest_package_reference(pref)
+            ret = app.cache.get_latest_package_revision(pref)
         return ret
 
     def package_revisions(self, pref: PkgReference, remote=None):
@@ -93,23 +92,20 @@ class ListAPI:
                                               "check latest first if needed"
         app = ConanBasicApp(self._conan_api)
         if remote:
-            results = app.remote_manager.get_package_revisions_references(pref, remote=remote)
+            results = app.remote_manager.get_package_revisions(pref, remote=remote)
         else:
-            results = app.cache.get_package_revisions_references(pref, only_latest_prev=False)
+            results = app.cache.get_package_revisions(pref)
         return results
 
     def _packages_configurations(self, ref: RecipeReference,
                                  remote=None) -> Dict[PkgReference, dict]:
-        assert ref.revision is not None, "packages: ref should have a revision. " \
-                                         "Check latest if needed."
+        assert ref.revision is not None and ref.revision != "latest", \
+            "packages: ref should have a revision. Check latest if needed."
         app = ConanBasicApp(self._conan_api)
         if not remote:
             prefs = app.cache.get_package_references(ref)
             packages = _get_cache_packages_binary_info(app.cache, prefs)
         else:
-            if ref.revision == "latest":
-                ref.revision = None
-                ref = app.remote_manager.get_latest_recipe_reference(ref, remote=remote)
             packages = app.remote_manager.search_packages(remote, ref)
         return packages
 
@@ -120,8 +116,6 @@ class ListAPI:
         :param query: str like "os=Windows AND (arch=x86 OR compiler=gcc)"
         :return: Dict[PkgReference, PkgConfiguration]
         """
-        if query is None:
-            return pkg_configurations
         try:
             if "!" in query:
                 raise ConanException("'!' character is not allowed")
@@ -323,27 +317,50 @@ class ListAPI:
         (Experimental) Find the remotes where the current package lists can be found
         """
         result = MultiPackagesList()
+        app = ConanBasicApp(self._conan_api)
         for r in remotes:
             result_pkg_list = PackagesList()
-            for ref, packages in package_list.items():
-                ref_no_rev = copy.copy(ref)  # TODO: Improve ugly API
-                ref_no_rev.revision = None
+            for ref, ref_contents in package_list.serialize().items():
+                ref = RecipeReference.loads(ref)
                 try:
-                    revs = self.recipe_revisions(ref_no_rev, remote=r)
+                    remote_rrevs = app.remote_manager.get_recipe_revisions(ref, remote=r)
                 except NotFoundException:
                     continue
-                if ref not in revs:  # not found
+                revisions = ref_contents.get("revisions")
+                if revisions is None:  # This is a package list just with name/version
+                    if remote_rrevs:
+                        result_pkg_list.add_ref(ref)
                     continue
-                result_pkg_list.add_ref(ref)
-                for pref, pkg_info in packages.items():
-                    pref_no_rev = copy.copy(pref)  # TODO: Improve ugly API
-                    pref_no_rev.revision = None
-                    try:
-                        prevs = self.package_revisions(pref_no_rev, remote=r)
-                    except NotFoundException:
+
+                for revision, rev_content in revisions.items():
+                    ref.revision = revision
+                    # We look for the value of revision in server, to return timestamp too
+                    found = next((r for r in remote_rrevs if r == ref), None)
+                    if not found:
                         continue
-                    if pref in prevs:
-                        result_pkg_list.add_pref(pref, pkg_info)
+                    result_pkg_list.add_ref(found)
+                    packages = rev_content.get("packages")
+                    if packages is None:
+                        continue
+                    for pkgid, pkgcontent in packages.items():
+                        pref = PkgReference(ref, pkgid)
+                        try:
+                            remote_prefs = app.remote_manager.get_package_revisions(pref, remote=r)
+                        except NotFoundException:
+                            continue
+                        pkg_revisions = pkgcontent.get("revisions")
+                        if pkg_revisions is None:  # This is a package_id, no prevs
+                            if remote_prefs:
+                                result_pkg_list.add_pref(pref, pkgcontent.get("info"))
+                            continue
+                        for pkg_revision, prev_content in pkg_revisions.items():
+                            pref.revision = pkg_revision
+                            # We look for the value of revision in server, to return timestamp too
+                            pfound = next((r for r in remote_prefs if r == pref), None)
+                            if not pfound:
+                                continue
+                            result_pkg_list.add_pref(pfound, pkgcontent.get("info"))
+
             if result_pkg_list:
                 result.add(r.name, result_pkg_list)
         return result
@@ -514,7 +531,7 @@ def _get_cache_packages_binary_info(cache, prefs) -> Dict[PkgReference, dict]:
     result = OrderedDict()
 
     for pref in prefs:
-        latest_prev = cache.get_latest_package_reference(pref)
+        latest_prev = cache.get_latest_package_revision(pref)
         pkg_layout = cache.pkg_layout(latest_prev)
 
         # Read conaninfo

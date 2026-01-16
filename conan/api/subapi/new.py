@@ -31,7 +31,7 @@ class NewAPI:
             try:
                 k, v = u.split("=", 1)
             except ValueError:
-                raise ConanException(f"Template definitions must be 'key=value', received {u}")
+                raise ConanException(f"Template definitions must be 'key=value', received '{u}'")
             k = k.replace("-", "")  # Remove possible "--name=value"
             # For variables that only show up once, no need for list to keep compatible behaviour
             if k in definitions:
@@ -166,7 +166,7 @@ class NewAPI:
     @staticmethod
     def render(template_files, definitions):
         result = {}
-        name = definitions.get("name", "pkg")
+        name = definitions.get("name", "mypkg")
         if isinstance(name, list):
             raise ConanException(f"name argument can't be multiple: {name}")
         if name != name.lower():
