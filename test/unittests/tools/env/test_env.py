@@ -249,7 +249,6 @@ def test_windows_case_insensitive_ps1(envvars, deactivation_mode):
         envvars._deactivation_mode = deactivation_mode
         envvars.save_ps1("test.ps1")
         save("display.ps1", display)
-        cmd = "powershell.exe .\\test.ps1 ; .\\display.ps1 ; .\\deactivate_test.ps1 ; .\\display.ps1"
         deactivate_cmd = "deactivate_test" if deactivation_mode else ".\\deactivate_test.ps1"
         cmd = f"powershell.exe .\\test.ps1 ; .\\display.ps1 ; {deactivate_cmd} ; .\\display.ps1"
         check_command_output(cmd, prevenv)

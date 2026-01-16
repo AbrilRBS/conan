@@ -4,7 +4,7 @@ from shlex import quote
 from collections import OrderedDict
 from contextlib import contextmanager
 
-from conan.api.output import ConanOutput, LEVEL_VERBOSE
+from conan.api.output import ConanOutput
 from conan.internal.api.install.generators import relativize_paths
 from conan.internal.subsystems import deduce_subsystem, WINDOWS, subsystem_path
 from conan.errors import ConanException
@@ -349,7 +349,6 @@ class EnvVars:
         self._conanfile = conanfile
         self._scope = scope
         self._subsystem = deduce_subsystem(conanfile, scope)
-        self._verbose = conanfile.output.level_allowed(LEVEL_VERBOSE)
         self._deactivation_mode = conanfile.conf.get("tools.env:deactivation_mode", default=None, check_type=str)
 
     @property
@@ -429,7 +428,7 @@ class EnvVars:
             if value:
                 result.append(f'set "{varname}={value}"')
             else:
-                result.append(f'set "{varname}=')
+                result.append(f'set "{varname}="')
 
         if generate_deactivate:
             deactivate_content = _bat_deactivate_contents(self._deactivation_mode, self._values, filename)
