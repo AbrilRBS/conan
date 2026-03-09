@@ -1,6 +1,6 @@
 import os
 
-from conan.api.output import ConanOutput, Color
+from conan.api.output import ConanOutput, Color, LEVEL_DEBUG
 from conan.internal.cache.home_paths import HomePaths
 from conan.internal.graph.build_mode import BuildMode
 from conan.internal.graph.compatibility import BinaryCompatibility
@@ -155,6 +155,10 @@ class GraphBinariesAnalyzer:
         original_binary = node.binary
         original_package_id = node.package_id
         conanfile.output.info(f"Main binary package '{original_package_id}' missing")
+        if conanfile.output.level_allowed(LEVEL_DEBUG):
+            compact_dumps = conanfile.info.summarize_compact()
+            for line in compact_dumps:
+                conanfile.output.debug(f"\t\t{line}", Color.BRIGHT_GREEN)
         conanfile.output.info(f"Checking {len(compatibles)} compatible configurations")
         compatibility_mode = self._global_conf.get("core.graph:compatibility_mode",
                                                    choices=("optimized",))
