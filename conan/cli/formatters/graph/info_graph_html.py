@@ -23,10 +23,14 @@ graph_info_html = r"""
             }
         </style>
 
-        <div style="display: grid; grid-template-columns: 75% 25%; grid-template-rows: 30px auto; height: 100vh;">
-            <div id="mylegend" style="background-color: lightgrey; grid-column-end: span 2;height: 100%"></div>
+        <div style="display: grid; grid-template-columns: auto fit-content(); grid-template-rows: 50px auto; height: 100vh;">
+            <div id="mylegend" style="background-color: #f9f9f9; grid-column-end: span 2;height: 100%;border-bottom: 1px solid lightgray"></div>
             <div id="mynetwork"></div>
-            <div style="background-color: lightgrey;min-height:100%;height:0;overflow-y: auto;">
+            <div style="background-color: #f9f9f9;min-height:100%;height:0;max-width: 25%;overflow-y: auto;">
+                <div style="display: flex; justify-content: flex-end">
+                    <button class="button" onclick="showhideclass('sidebar-content');">&#8801;</button>
+                </div>
+                <div class="sidebar-content">
                 <div>
                     <input type="checkbox" onchange="switchBuild()" id="show_build_requires" checked />
                     <label for="show_build_requires">Show build-requires</label>
@@ -60,6 +64,7 @@ graph_info_html = r"""
                 <div id="controls" class="controls" style="padding:5; display:none"></div>
                 <div id="details"  style="padding:10;" class="noPrint">Package info: Click on one package to show information</div>
                 <div id="error" style="padding:10;" class="noPrint"></div>
+                </div>
             </div>
         </div>
 
