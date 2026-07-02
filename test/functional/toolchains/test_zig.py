@@ -1,8 +1,58 @@
+import platform
 import textwrap
 
 import pytest
 
 from conan.test.utils.tools import TestClient
+
+# Shared by every test below: generic glue that links whatever ZigDeps generated and runs it.
+# Nothing here is package-specific, so a single build.zig/consumer shape covers all scenarios.
+_BUILD_ZIG = textwrap.dedent("""
+    const std = @import("std");
+    const conan_setup = @import("conan_zig_deps/conan_setup.zig");
+
+    pub fn build(b: *std.Build) void {
+        const target = b.standardTargetOptions(.{});
+        const optimize = b.standardOptimizeOption(.{});
+
+        const mod = b.createModule(.{ .target = target, .optimize = optimize });
+        mod.addCSourceFile(.{ .file = b.path("main.c"), .flags = &.{} });
+        mod.link_libc = true;
+
+        const exe = b.addExecutable(.{ .name = "app", .root_module = mod });
+        conan_setup.linkDependencies(exe);
+        b.installArtifact(exe);
+
+        const run_cmd = b.addRunArtifact(exe);
+        run_cmd.step.dependOn(b.getInstallStep());
+        const run_step = b.step("run", "Run the app");
+        run_step.dependOn(&run_cmd.step);
+    }
+    """)
+
+
+def _app_conanfile(requires):
+    return textwrap.dedent("""
+        from conan import ConanFile
+
+        class App(ConanFile):
+            requires = "%s"
+            generators = "ZigDeps"
+
+            def build(self):
+                self.run("zig build run")
+        """) % requires
+
+
+def _main_c(function_name):
+    return textwrap.dedent("""
+        #include <stdio.h>
+        extern int %s(void);
+        int main(void) {
+            printf("%s=%%d\\n", %s());
+            return 0;
+        }
+        """) % (function_name, function_name, function_name)
 
 
 @pytest.mark.slow
@@ -45,55 +95,238 @@ def test_zigdeps():
     comp2_h = 'int comp2_value(void);\n'
     comp2_c = 'int comp2_value(void) { return 41; }\n'
 
-    app_conanfile = textwrap.dedent("""
-        from conan import ConanFile
-
-        class App(ConanFile):
-            requires = "liba/1.0"
-            generators = "ZigDeps"
-
-            def build(self):
-                self.run("zig build run")
-        """)
-    build_zig = textwrap.dedent("""
-        const std = @import("std");
-        const conan_setup = @import("conan_zig_deps/conan_setup.zig");
-
-        pub fn build(b: *std.Build) void {
-            const target = b.standardTargetOptions(.{});
-            const optimize = b.standardOptimizeOption(.{});
-
-            const mod = b.createModule(.{ .target = target, .optimize = optimize });
-            mod.addCSourceFile(.{ .file = b.path("main.c"), .flags = &.{} });
-            mod.link_libc = true;
-
-            const exe = b.addExecutable(.{ .name = "app", .root_module = mod });
-            conan_setup.linkDependencies(exe);
-            b.installArtifact(exe);
-
-            const run_cmd = b.addRunArtifact(exe);
-            run_cmd.step.dependOn(b.getInstallStep());
-            const run_step = b.step("run", "Run the app");
-            run_step.dependOn(&run_cmd.step);
-        }
-        """)
-    main_c = textwrap.dedent("""
-        #include <stdio.h>
-        extern int comp1_value(void);
-        int main(void) {
-            printf("comp1_value=%d\\n", comp1_value());
-            return 0;
-        }
-        """)
-
     c.save({"liba/conanfile.py": liba_conanfile,
             "liba/comp1.h": comp1_h,
             "liba/comp1.c": comp1_c,
             "liba/comp2.h": comp2_h,
             "liba/comp2.c": comp2_c,
-            "conanfile.py": app_conanfile,
-            "build.zig": build_zig,
-            "main.c": main_c})
+            "conanfile.py": _app_conanfile("liba/1.0"),
+            "build.zig": _BUILD_ZIG,
+            "main.c": _main_c("comp1_value")})
     c.run("create liba")
     c.run("build .")
     assert "comp1_value=42" in c.out
+
+
+def _shared_ext():
+    return ".dylib" if platform.system() == "Darwin" else ".so"
+
+
+def _shared_link_flags(libname):
+    """ Platform-specific flags a shared library needs at link time: an install name on
+    Darwin so the resulting rpath actually resolves it (see #19190/#19135), a soname on
+    Linux/ELF as the real-world equivalent """
+    if platform.system() == "Darwin":
+        return "-install_name @rpath/lib%s%s" % (libname, _shared_ext())
+    return "-Wl,-soname,lib%s%s" % (libname, _shared_ext())
+
+
+@pytest.mark.slow
+@pytest.mark.tool("zig")
+@pytest.mark.skipif(platform.system() == "Windows",
+                    reason="Building a portable DLL with zig cc needs extra export handling "
+                           "unrelated to ZigDeps; the Windows import-lib/no-rpath branch is "
+                           "already covered by "
+                           "test_zigdeps_windows_shared_uses_import_lib_no_rpath")
+def test_zigdeps_shared_chain():
+    """ A chain of two shared libraries (shareda -> sharedb): both get linked and both need
+    their own rpath entry for the resulting binary to find them at runtime """
+    c = TestClient()
+    ext = _shared_ext()
+    sharedb_conanfile = textwrap.dedent("""
+        import os
+        from conan import ConanFile
+        from conan.tools.files import copy
+
+        class SharedB(ConanFile):
+            name = "sharedb"
+            version = "1.0"
+            package_type = "shared-library"
+            exports_sources = "sharedb.c", "sharedb.h"
+
+            def build(self):
+                self.run("zig cc -shared -fPIC %s -o libsharedb%s sharedb.c")
+
+            def package(self):
+                copy(self, "libsharedb%s", self.build_folder,
+                    os.path.join(self.package_folder, "lib"))
+                copy(self, "*.h", self.build_folder, os.path.join(self.package_folder, "include"))
+
+            def package_info(self):
+                self.cpp_info.libs = ["sharedb"]
+        """) % (_shared_link_flags("sharedb"), ext, ext)
+    shareda_conanfile = textwrap.dedent("""
+        import os
+        from conan import ConanFile
+        from conan.tools.files import copy
+
+        class SharedA(ConanFile):
+            name = "shareda"
+            version = "1.0"
+            package_type = "shared-library"
+            requires = "sharedb/1.0"
+            exports_sources = "shareda.c", "shareda.h"
+
+            def build(self):
+                dep = self.dependencies["sharedb"].cpp_info
+                self.run('zig cc -c shareda.c -I"' + dep.includedirs[0] + '" -o shareda.o')
+                self.run('zig cc -shared -fPIC %s -o libshareda%s shareda.o -L"'
+                         + dep.libdirs[0] + '" -lsharedb')
+
+            def package(self):
+                copy(self, "libshareda%s", self.build_folder,
+                    os.path.join(self.package_folder, "lib"))
+                copy(self, "*.h", self.build_folder, os.path.join(self.package_folder, "include"))
+
+            def package_info(self):
+                self.cpp_info.libs = ["shareda"]
+        """) % (_shared_link_flags("shareda"), ext, ext)
+
+    sharedb_h = "int shared_b_value(void);\n"
+    sharedb_c = "int shared_b_value(void) { return 10; }\n"
+    shareda_h = "int shared_a_value(void);\n"
+    shareda_c = textwrap.dedent("""
+        #include "sharedb.h"
+        int shared_a_value(void) { return shared_b_value() + 1; }
+        """)
+
+    c.save({"sharedb/conanfile.py": sharedb_conanfile,
+            "sharedb/sharedb.h": sharedb_h,
+            "sharedb/sharedb.c": sharedb_c,
+            "shareda/conanfile.py": shareda_conanfile,
+            "shareda/shareda.h": shareda_h,
+            "shareda/shareda.c": shareda_c,
+            "conanfile.py": _app_conanfile("shareda/1.0"),
+            "build.zig": _BUILD_ZIG,
+            "main.c": _main_c("shared_a_value")})
+    c.run("create sharedb")
+    c.run("create shareda")
+    c.run("build .")
+    assert "shared_a_value=11" in c.out
+
+
+@pytest.mark.slow
+@pytest.mark.tool("zig")
+@pytest.mark.skipif(platform.system() == "Windows",
+                    reason="Building a portable DLL with zig cc needs extra export handling "
+                           "unrelated to ZigDeps; the Windows import-lib/no-rpath branch is "
+                           "already covered by "
+                           "test_zigdeps_windows_shared_uses_import_lib_no_rpath")
+def test_zigdeps_static_shared_static_chain():
+    """ statictop (static) -> sharedmid (shared) -> staticleaf (static, private/invisible).
+    sharedmid statically embeds staticleaf at its own build time, so staticleaf must NOT be
+    relinked by (or even visible to) the final consumer - only statictop and sharedmid should
+    show up in the generated ZigDeps map """
+    c = TestClient()
+    ext = _shared_ext()
+    staticleaf_conanfile = textwrap.dedent("""
+        import os
+        from conan import ConanFile
+        from conan.tools.files import copy
+
+        class StaticLeaf(ConanFile):
+            name = "staticleaf"
+            version = "1.0"
+            package_type = "static-library"
+            exports_sources = "staticleaf.c", "staticleaf.h"
+
+            def build(self):
+                self.run("zig cc -c staticleaf.c -o staticleaf.o")
+                self.run("zig ar rcs libstaticleaf.a staticleaf.o")
+
+            def package(self):
+                copy(self, "*.a", self.build_folder, os.path.join(self.package_folder, "lib"))
+                copy(self, "*.h", self.build_folder, os.path.join(self.package_folder, "include"))
+
+            def package_info(self):
+                self.cpp_info.libs = ["staticleaf"]
+        """)
+    sharedmid_conanfile = textwrap.dedent("""
+        import os
+        from conan import ConanFile
+        from conan.tools.files import copy
+
+        class SharedMid(ConanFile):
+            name = "sharedmid"
+            version = "1.0"
+            package_type = "shared-library"
+            exports_sources = "sharedmid.c", "sharedmid.h"
+
+            def requirements(self):
+                # Private: fully embedded, must not propagate to further consumers
+                self.requires("staticleaf/1.0", visible=False)
+
+            def build(self):
+                dep = self.dependencies["staticleaf"].cpp_info
+                self.run('zig cc -c sharedmid.c -I"' + dep.includedirs[0] + '" -o sharedmid.o')
+                self.run('zig cc -shared -fPIC %s -o libsharedmid%s sharedmid.o -L"'
+                         + dep.libdirs[0] + '" -lstaticleaf')
+
+            def package(self):
+                copy(self, "libsharedmid%s", self.build_folder,
+                    os.path.join(self.package_folder, "lib"))
+                copy(self, "*.h", self.build_folder, os.path.join(self.package_folder, "include"))
+
+            def package_info(self):
+                self.cpp_info.libs = ["sharedmid"]
+        """) % (_shared_link_flags("sharedmid"), ext, ext)
+    statictop_conanfile = textwrap.dedent("""
+        import os
+        from conan import ConanFile
+        from conan.tools.files import copy
+
+        class StaticTop(ConanFile):
+            name = "statictop"
+            version = "1.0"
+            package_type = "static-library"
+            requires = "sharedmid/1.0"
+            exports_sources = "statictop.c", "statictop.h"
+
+            def build(self):
+                dep = self.dependencies["sharedmid"].cpp_info
+                self.run('zig cc -c statictop.c -I"' + dep.includedirs[0] + '" -o statictop.o')
+                self.run("zig ar rcs libstatictop.a statictop.o")
+
+            def package(self):
+                copy(self, "*.a", self.build_folder, os.path.join(self.package_folder, "lib"))
+                copy(self, "*.h", self.build_folder, os.path.join(self.package_folder, "include"))
+
+            def package_info(self):
+                self.cpp_info.libs = ["statictop"]
+        """)
+
+    staticleaf_h = "int static_leaf_value(void);\n"
+    staticleaf_c = "int static_leaf_value(void) { return 100; }\n"
+    sharedmid_h = "int shared_mid_value(void);\n"
+    sharedmid_c = textwrap.dedent("""
+        #include "staticleaf.h"
+        int shared_mid_value(void) { return static_leaf_value() + 1; }
+        """)
+    statictop_h = "int static_top_value(void);\n"
+    statictop_c = textwrap.dedent("""
+        #include "sharedmid.h"
+        int static_top_value(void) { return shared_mid_value() + 1; }
+        """)
+
+    c.save({"staticleaf/conanfile.py": staticleaf_conanfile,
+            "staticleaf/staticleaf.h": staticleaf_h,
+            "staticleaf/staticleaf.c": staticleaf_c,
+            "sharedmid/conanfile.py": sharedmid_conanfile,
+            "sharedmid/sharedmid.h": sharedmid_h,
+            "sharedmid/sharedmid.c": sharedmid_c,
+            "statictop/conanfile.py": statictop_conanfile,
+            "statictop/statictop.h": statictop_h,
+            "statictop/statictop.c": statictop_c,
+            "conanfile.py": _app_conanfile("statictop/1.0"),
+            "build.zig": _BUILD_ZIG,
+            "main.c": _main_c("static_top_value")})
+    c.run("create staticleaf")
+    c.run("create sharedmid")
+    c.run("create statictop")
+    c.run("build .")
+    assert "static_top_value=102" in c.out
+
+    deps_content = c.load("conan_zig_deps/conan_deps.zig")
+    assert '"statictop::statictop"' in deps_content
+    assert '"sharedmid::sharedmid"' in deps_content
+    assert "staticleaf" not in deps_content  # private require, invisible to the consumer
