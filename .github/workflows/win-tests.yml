@@ -179,6 +179,7 @@ jobs:
             C:\tools\bazel\7.6.2
             C:\tools\bazel\8.4.2
             C:\tools\bazel\9.1.0
+            C:\tools\zig\0.16.0
           key: ${{ runner.os }}-conan-tools-cache
 
       - name: Install CMake versions
@@ -221,6 +222,20 @@ jobs:
               Expand-Archive -Path $zipFile -DestinationPath $destination -Force
               Remove-Item $zipFile
           }
+
+      - name: Install Zig
+        if: steps.cache-tools.outputs.cache-hit != 'true'
+        run: |
+          $version = "0.16.0"
+          Write-Host "Downloading Zig $version for Windows..."
+          $url = "https://ziglang.org/download/$version/zig-x86_64-windows-$version.zip"
+          $zipFile = "zig-$version-windows-x86_64.zip"
+          $tmpDir = "C:\tools\zig_tmp"
+          Invoke-WebRequest -Uri $url -OutFile $zipFile
+          Expand-Archive -Path $zipFile -DestinationPath $tmpDir -Force
+          Move-Item -Path "$tmpDir\zig-x86_64-windows-$version" -Destination "C:\tools\zig\$version"
+          Remove-Item $zipFile
+          Remove-Item -Recurse -Force $tmpDir
 
       - name: Prepare environment for functional tests
         run: |

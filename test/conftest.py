@@ -208,6 +208,14 @@ tools_locations = {
             "path": {"Linux": "/opt/intel/oneapi/compiler/2026.0/bin"},
             "root": {"Linux": "/opt/intel/oneapi"}
         }
+    },
+    "zig": {
+        "default": "0.16.0",
+        "0.16.0": {
+            "path": {'Linux': '/usr/share/zig-0.16.0',
+                     'Windows': 'C:/tools/zig/0.16.0',
+                     'Darwin': '/Users/runner/Applications/zig/0.16.0'}
+        }
     }
 }
 
