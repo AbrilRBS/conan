@@ -108,6 +108,77 @@ def test_zigdeps():
     assert "comp1_value=42" in c.out
 
 
+@pytest.mark.slow
+@pytest.mark.tool("cmake")
+@pytest.mark.tool("zig")
+def test_zigdeps_cmake_deps():
+    """ Same graph as test_zigdeps (2 static components, one requiring the other), but the
+    dependency is built with CMake+the system compiler instead of ``zig cc`` - only the final
+    consumer uses Zig, proving ZigDeps works on binaries it had no part in producing """
+    c = TestClient()
+    liba_conanfile = textwrap.dedent("""
+        from conan import ConanFile
+        from conan.tools.cmake import CMake, CMakeToolchain, cmake_layout
+
+        class LibA(ConanFile):
+            name = "liba"
+            version = "1.0"
+            package_type = "static-library"
+            settings = "os", "compiler", "build_type", "arch"
+            exports_sources = "CMakeLists.txt", "comp1.c", "comp1.h", "comp2.c", "comp2.h"
+            generators = "CMakeToolchain"
+
+            def layout(self):
+                cmake_layout(self)
+
+            def build(self):
+                cmake = CMake(self)
+                cmake.configure()
+                cmake.build()
+
+            def package(self):
+                cmake = CMake(self)
+                cmake.install()
+
+            def package_info(self):
+                self.cpp_info.components["comp1"].libs = ["comp1"]
+                self.cpp_info.components["comp1"].requires = ["comp2"]
+                self.cpp_info.components["comp2"].libs = ["comp2"]
+        """)
+    liba_cmakelists = textwrap.dedent("""
+        cmake_minimum_required(VERSION 3.15)
+        project(liba C)
+        add_library(comp2 STATIC comp2.c)
+        add_library(comp1 STATIC comp1.c)
+        target_link_libraries(comp1 PUBLIC comp2)
+        install(TARGETS comp1 comp2
+                ARCHIVE DESTINATION lib
+                LIBRARY DESTINATION lib
+                RUNTIME DESTINATION bin)
+        install(FILES comp1.h comp2.h DESTINATION include)
+        """)
+    comp1_h = 'int comp1_value(void);\n'
+    comp1_c = textwrap.dedent("""
+        extern int comp2_value(void);
+        int comp1_value(void) { return comp2_value() + 1; }
+        """)
+    comp2_h = 'int comp2_value(void);\n'
+    comp2_c = 'int comp2_value(void) { return 41; }\n'
+
+    c.save({"liba/conanfile.py": liba_conanfile,
+            "liba/CMakeLists.txt": liba_cmakelists,
+            "liba/comp1.h": comp1_h,
+            "liba/comp1.c": comp1_c,
+            "liba/comp2.h": comp2_h,
+            "liba/comp2.c": comp2_c,
+            "conanfile.py": _app_conanfile("liba/1.0"),
+            "build.zig": _BUILD_ZIG,
+            "main.c": _main_c("comp1_value")})
+    c.run("create liba")
+    c.run("build .")
+    assert "comp1_value=42" in c.out
+
+
 def _shared_ext():
     return ".dylib" if platform.system() == "Darwin" else ".so"
 
@@ -194,6 +265,124 @@ def test_zigdeps_shared_chain():
             "sharedb/sharedb.h": sharedb_h,
             "sharedb/sharedb.c": sharedb_c,
             "shareda/conanfile.py": shareda_conanfile,
+            "shareda/shareda.h": shareda_h,
+            "shareda/shareda.c": shareda_c,
+            "conanfile.py": _app_conanfile("shareda/1.0"),
+            "build.zig": _BUILD_ZIG,
+            "main.c": _main_c("shared_a_value")})
+    c.run("create sharedb")
+    c.run("create shareda")
+    c.run("build .")
+    assert "shared_a_value=11" in c.out
+
+
+@pytest.mark.slow
+@pytest.mark.tool("cmake")
+@pytest.mark.tool("zig")
+@pytest.mark.skipif(platform.system() == "Windows",
+                    reason="Building a portable DLL with zig needs extra export handling "
+                           "unrelated to ZigDeps; the Windows import-lib/no-rpath branch is "
+                           "already covered by "
+                           "test_zigdeps_windows_shared_uses_import_lib_no_rpath")
+def test_zigdeps_shared_chain_cmake_deps():
+    """ Same graph as test_zigdeps_shared_chain, but both shared libraries are built with
+    CMake+the system compiler - only the final consumer uses Zig """
+    c = TestClient()
+    sharedb_conanfile = textwrap.dedent("""
+        from conan import ConanFile
+        from conan.tools.cmake import CMake, CMakeToolchain, cmake_layout
+
+        class SharedB(ConanFile):
+            name = "sharedb"
+            version = "1.0"
+            package_type = "shared-library"
+            settings = "os", "compiler", "build_type", "arch"
+            exports_sources = "CMakeLists.txt", "sharedb.c", "sharedb.h"
+            generators = "CMakeToolchain"
+
+            def layout(self):
+                cmake_layout(self)
+
+            def build(self):
+                cmake = CMake(self)
+                cmake.configure()
+                cmake.build()
+
+            def package(self):
+                cmake = CMake(self)
+                cmake.install()
+
+            def package_info(self):
+                self.cpp_info.libs = ["sharedb"]
+        """)
+    sharedb_cmakelists = textwrap.dedent("""
+        cmake_minimum_required(VERSION 3.15)
+        project(sharedb C)
+        add_library(sharedb SHARED sharedb.c)
+        install(TARGETS sharedb
+                ARCHIVE DESTINATION lib
+                LIBRARY DESTINATION lib
+                RUNTIME DESTINATION bin)
+        install(FILES sharedb.h DESTINATION include)
+        """)
+    shareda_conanfile = textwrap.dedent("""
+        from conan import ConanFile
+        from conan.tools.cmake import CMake, CMakeDeps, CMakeToolchain, cmake_layout
+
+        class SharedA(ConanFile):
+            name = "shareda"
+            version = "1.0"
+            package_type = "shared-library"
+            settings = "os", "compiler", "build_type", "arch"
+            requires = "sharedb/1.0"
+            exports_sources = "CMakeLists.txt", "shareda.c", "shareda.h"
+
+            def layout(self):
+                cmake_layout(self)
+
+            def generate(self):
+                CMakeDeps(self).generate()
+                CMakeToolchain(self).generate()
+
+            def build(self):
+                cmake = CMake(self)
+                cmake.configure()
+                cmake.build()
+
+            def package(self):
+                cmake = CMake(self)
+                cmake.install()
+
+            def package_info(self):
+                self.cpp_info.libs = ["shareda"]
+        """)
+    shareda_cmakelists = textwrap.dedent("""
+        cmake_minimum_required(VERSION 3.15)
+        project(shareda C)
+        find_package(sharedb REQUIRED CONFIG)
+        add_library(shareda SHARED shareda.c)
+        target_link_libraries(shareda PUBLIC sharedb::sharedb)
+        install(TARGETS shareda
+                ARCHIVE DESTINATION lib
+                LIBRARY DESTINATION lib
+                RUNTIME DESTINATION bin)
+        install(FILES shareda.h DESTINATION include)
+        """)
+
+    sharedb_h = "int shared_b_value(void);\n"
+    sharedb_c = "int shared_b_value(void) { return 10; }\n"
+    shareda_h = "int shared_a_value(void);\n"
+    shareda_c = textwrap.dedent("""
+        #include "sharedb.h"
+        int shared_a_value(void) { return shared_b_value() + 1; }
+        """)
+
+    c.save({"sharedb/conanfile.py": sharedb_conanfile,
+            "sharedb/CMakeLists.txt": sharedb_cmakelists,
+            "sharedb/sharedb.h": sharedb_h,
+            "sharedb/sharedb.c": sharedb_c,
+            "shareda/conanfile.py": shareda_conanfile,
+            "shareda/CMakeLists.txt": shareda_cmakelists,
             "shareda/shareda.h": shareda_h,
             "shareda/shareda.c": shareda_c,
             "conanfile.py": _app_conanfile("shareda/1.0"),
@@ -315,6 +504,185 @@ def test_zigdeps_static_shared_static_chain():
             "sharedmid/sharedmid.h": sharedmid_h,
             "sharedmid/sharedmid.c": sharedmid_c,
             "statictop/conanfile.py": statictop_conanfile,
+            "statictop/statictop.h": statictop_h,
+            "statictop/statictop.c": statictop_c,
+            "conanfile.py": _app_conanfile("statictop/1.0"),
+            "build.zig": _BUILD_ZIG,
+            "main.c": _main_c("static_top_value")})
+    c.run("create staticleaf")
+    c.run("create sharedmid")
+    c.run("create statictop")
+    c.run("build .")
+    assert "static_top_value=102" in c.out
+
+    deps_content = c.load("conan_zig_deps/conan_deps.zig")
+    assert '"statictop::statictop"' in deps_content
+    assert '"sharedmid::sharedmid"' in deps_content
+    assert "staticleaf" not in deps_content  # private require, invisible to the consumer
+
+
+@pytest.mark.slow
+@pytest.mark.tool("cmake")
+@pytest.mark.tool("zig")
+@pytest.mark.skipif(platform.system() == "Windows",
+                    reason="Building a portable DLL with zig needs extra export handling "
+                           "unrelated to ZigDeps; the Windows import-lib/no-rpath branch is "
+                           "already covered by "
+                           "test_zigdeps_windows_shared_uses_import_lib_no_rpath")
+def test_zigdeps_static_shared_static_chain_cmake_deps():
+    """ Same graph as test_zigdeps_static_shared_static_chain, but all 3 dependencies are
+    built with CMake+the system compiler - only the final consumer uses Zig """
+    c = TestClient()
+    staticleaf_conanfile = textwrap.dedent("""
+        from conan import ConanFile
+        from conan.tools.cmake import CMake, CMakeToolchain, cmake_layout
+
+        class StaticLeaf(ConanFile):
+            name = "staticleaf"
+            version = "1.0"
+            package_type = "static-library"
+            settings = "os", "compiler", "build_type", "arch"
+            exports_sources = "CMakeLists.txt", "staticleaf.c", "staticleaf.h"
+            generators = "CMakeToolchain"
+
+            def layout(self):
+                cmake_layout(self)
+
+            def build(self):
+                cmake = CMake(self)
+                cmake.configure()
+                cmake.build()
+
+            def package(self):
+                cmake = CMake(self)
+                cmake.install()
+
+            def package_info(self):
+                self.cpp_info.libs = ["staticleaf"]
+        """)
+    staticleaf_cmakelists = textwrap.dedent("""
+        cmake_minimum_required(VERSION 3.15)
+        project(staticleaf C)
+        add_library(staticleaf STATIC staticleaf.c)
+        install(TARGETS staticleaf
+                ARCHIVE DESTINATION lib
+                LIBRARY DESTINATION lib
+                RUNTIME DESTINATION bin)
+        install(FILES staticleaf.h DESTINATION include)
+        """)
+    sharedmid_conanfile = textwrap.dedent("""
+        from conan import ConanFile
+        from conan.tools.cmake import CMake, CMakeDeps, CMakeToolchain, cmake_layout
+
+        class SharedMid(ConanFile):
+            name = "sharedmid"
+            version = "1.0"
+            package_type = "shared-library"
+            settings = "os", "compiler", "build_type", "arch"
+            exports_sources = "CMakeLists.txt", "sharedmid.c", "sharedmid.h"
+
+            def requirements(self):
+                # Private: fully embedded, must not propagate to further consumers
+                self.requires("staticleaf/1.0", visible=False)
+
+            def layout(self):
+                cmake_layout(self)
+
+            def generate(self):
+                CMakeDeps(self).generate()
+                CMakeToolchain(self).generate()
+
+            def build(self):
+                cmake = CMake(self)
+                cmake.configure()
+                cmake.build()
+
+            def package(self):
+                cmake = CMake(self)
+                cmake.install()
+
+            def package_info(self):
+                self.cpp_info.libs = ["sharedmid"]
+        """)
+    sharedmid_cmakelists = textwrap.dedent("""
+        cmake_minimum_required(VERSION 3.15)
+        project(sharedmid C)
+        find_package(staticleaf REQUIRED CONFIG)
+        add_library(sharedmid SHARED sharedmid.c)
+        target_link_libraries(sharedmid PRIVATE staticleaf::staticleaf)
+        install(TARGETS sharedmid
+                ARCHIVE DESTINATION lib
+                LIBRARY DESTINATION lib
+                RUNTIME DESTINATION bin)
+        install(FILES sharedmid.h DESTINATION include)
+        """)
+    statictop_conanfile = textwrap.dedent("""
+        from conan import ConanFile
+        from conan.tools.cmake import CMake, CMakeDeps, CMakeToolchain, cmake_layout
+
+        class StaticTop(ConanFile):
+            name = "statictop"
+            version = "1.0"
+            package_type = "static-library"
+            settings = "os", "compiler", "build_type", "arch"
+            requires = "sharedmid/1.0"
+            exports_sources = "CMakeLists.txt", "statictop.c", "statictop.h"
+
+            def layout(self):
+                cmake_layout(self)
+
+            def generate(self):
+                CMakeDeps(self).generate()
+                CMakeToolchain(self).generate()
+
+            def build(self):
+                cmake = CMake(self)
+                cmake.configure()
+                cmake.build()
+
+            def package(self):
+                cmake = CMake(self)
+                cmake.install()
+
+            def package_info(self):
+                self.cpp_info.libs = ["statictop"]
+        """)
+    statictop_cmakelists = textwrap.dedent("""
+        cmake_minimum_required(VERSION 3.15)
+        project(statictop C)
+        find_package(sharedmid REQUIRED CONFIG)
+        add_library(statictop STATIC statictop.c)
+        target_link_libraries(statictop PUBLIC sharedmid::sharedmid)
+        install(TARGETS statictop
+                ARCHIVE DESTINATION lib
+                LIBRARY DESTINATION lib
+                RUNTIME DESTINATION bin)
+        install(FILES statictop.h DESTINATION include)
+        """)
+
+    staticleaf_h = "int static_leaf_value(void);\n"
+    staticleaf_c = "int static_leaf_value(void) { return 100; }\n"
+    sharedmid_h = "int shared_mid_value(void);\n"
+    sharedmid_c = textwrap.dedent("""
+        #include "staticleaf.h"
+        int shared_mid_value(void) { return static_leaf_value() + 1; }
+        """)
+    statictop_h = "int static_top_value(void);\n"
+    statictop_c = textwrap.dedent("""
+        #include "sharedmid.h"
+        int static_top_value(void) { return shared_mid_value() + 1; }
+        """)
+
+    c.save({"staticleaf/conanfile.py": staticleaf_conanfile,
+            "staticleaf/CMakeLists.txt": staticleaf_cmakelists,
+            "staticleaf/staticleaf.h": staticleaf_h,
+            "staticleaf/staticleaf.c": staticleaf_c,
+            "sharedmid/conanfile.py": sharedmid_conanfile,
+            "sharedmid/CMakeLists.txt": sharedmid_cmakelists,
+            "sharedmid/sharedmid.h": sharedmid_h,
+            "sharedmid/sharedmid.c": sharedmid_c,
+            "statictop/conanfile.py": statictop_conanfile,
+            "statictop/CMakeLists.txt": statictop_cmakelists,
             "statictop/statictop.h": statictop_h,
             "statictop/statictop.c": statictop_c,
             "conanfile.py": _app_conanfile("statictop/1.0"),
