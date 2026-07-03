@@ -40,7 +40,14 @@ def _app_conanfile(requires):
             generators = "ZigDeps"
 
             def build(self):
-                self.run("zig build run")
+                # Conan's preferred way to make a dependency's shared libraries findable at
+                # runtime is the auto-generated conanrun environment (PATH on Windows,
+                # (DY)LD_LIBRARY_PATH on Unix) - see e.g. test_cps.py or
+                # test_cmakeconfigdeps_new_cpp_linkage.py for the same idiom. ZigDeps' own
+                # rpath/DLL-copy handling (see conan_setup.zig) means this isn't strictly
+                # required here, but activating it is the idiomatic, defense-in-depth way to
+                # run a freshly built binary against Conan dependencies regardless of that.
+                self.run("zig build run", env="conanrun")
         """) % requires
 
 
@@ -207,15 +214,25 @@ def test_zigdeps_cmake_deps():
 
 
 def _shared_ext():
-    return ".dylib" if platform.system() == "Darwin" else ".so"
+    system = platform.system()
+    if system == "Darwin":
+        return ".dylib"
+    if system == "Windows":
+        return ".dll"
+    return ".so"
 
 
 def _shared_link_flags(libname):
     """ Platform-specific flags a shared library needs at link time: an install name on
     Darwin so the resulting rpath actually resolves it (see #19190/#19135), a soname on
-    Linux/ELF as the real-world equivalent """
-    if platform.system() == "Darwin":
+    Linux/ELF as the real-world equivalent, and an explicit import library on Windows (LLD's
+    MinGW-compatible COFF linker, unlike a plain ELF/Mach-O link, doesn't produce one unless
+    asked - matching the .a naming Conan's own auto-deduction regex expects) """
+    system = platform.system()
+    if system == "Darwin":
         return "-install_name @rpath/lib%s%s" % (libname, _shared_ext())
+    if system == "Windows":
+        return "-Wl,--out-implib,lib%s.a" % libname
     return "-Wl,-soname,lib%s%s" % (libname, _shared_ext())
 
 
@@ -261,13 +278,20 @@ def test_zigdeps_shared_chain():
                 self.run("zig cc -shared -fPIC -Dsharedb_EXPORTS %s -o libsharedb%s sharedb.c")
 
             def package(self):
-                copy(self, "libsharedb%s", self.build_folder,
-                    os.path.join(self.package_folder, "lib"))
+                # Split by pattern, not by platform: the runtime-loadable file (.so/.dylib/
+                # .dll) goes to bindirs on Windows (where Conan's own auto-deduction looks
+                # for it) and libdirs everywhere else; any import library (.a, Windows-only
+                # here) always goes to libdirs. Harmless no-ops for the patterns that don't
+                # apply to the current platform.
+                copy(self, "*.dll", self.build_folder, os.path.join(self.package_folder, "bin"))
+                copy(self, "*.so*", self.build_folder, os.path.join(self.package_folder, "lib"))
+                copy(self, "*.dylib", self.build_folder, os.path.join(self.package_folder, "lib"))
+                copy(self, "*.a", self.build_folder, os.path.join(self.package_folder, "lib"))
                 copy(self, "*.h", self.build_folder, os.path.join(self.package_folder, "include"))
 
             def package_info(self):
                 self.cpp_info.libs = ["sharedb"]
-        """) % (_shared_link_flags("sharedb"), ext, ext)
+        """) % (_shared_link_flags("sharedb"), ext)
     shareda_conanfile = textwrap.dedent("""
         import os
         from conan import ConanFile
@@ -288,13 +312,15 @@ def test_zigdeps_shared_chain():
                          + dep.libdirs[0] + '" -lsharedb')
 
             def package(self):
-                copy(self, "libshareda%s", self.build_folder,
-                    os.path.join(self.package_folder, "lib"))
+                copy(self, "*.dll", self.build_folder, os.path.join(self.package_folder, "bin"))
+                copy(self, "*.so*", self.build_folder, os.path.join(self.package_folder, "lib"))
+                copy(self, "*.dylib", self.build_folder, os.path.join(self.package_folder, "lib"))
+                copy(self, "*.a", self.build_folder, os.path.join(self.package_folder, "lib"))
                 copy(self, "*.h", self.build_folder, os.path.join(self.package_folder, "include"))
 
             def package_info(self):
                 self.cpp_info.libs = ["shareda"]
-        """) % (_shared_link_flags("shareda"), ext, ext)
+        """) % (_shared_link_flags("shareda"), ext)
 
     sharedb_h = _export_header("sharedb", "shared_b_value")
     sharedb_c = textwrap.dedent("""
@@ -492,13 +518,15 @@ def test_zigdeps_static_shared_static_chain():
                          + dep.libdirs[0] + '" -lstaticleaf')
 
             def package(self):
-                copy(self, "libsharedmid%s", self.build_folder,
-                    os.path.join(self.package_folder, "lib"))
+                copy(self, "*.dll", self.build_folder, os.path.join(self.package_folder, "bin"))
+                copy(self, "*.so*", self.build_folder, os.path.join(self.package_folder, "lib"))
+                copy(self, "*.dylib", self.build_folder, os.path.join(self.package_folder, "lib"))
+                copy(self, "*.a", self.build_folder, os.path.join(self.package_folder, "lib"))
                 copy(self, "*.h", self.build_folder, os.path.join(self.package_folder, "include"))
 
             def package_info(self):
                 self.cpp_info.libs = ["sharedmid"]
-        """) % (_shared_link_flags("sharedmid"), ext, ext)
+        """) % (_shared_link_flags("sharedmid"), ext)
     statictop_conanfile = textwrap.dedent("""
         import os
         from conan import ConanFile
@@ -821,3 +849,58 @@ def test_zigdeps_link_single_component():
     c.run("create multicomp")
     c.run("build .")
     assert "used_value=6" in c.out
+
+
+@pytest.mark.slow
+@pytest.mark.tool("zig")
+def test_zigdeps_cyclic_requires_does_not_hang():
+    """ Regression test: cpp_info component requires can form a cycle (Conan doesn't validate
+    against this, unlike the package dependency graph itself) - the generated
+    linkDependency() must not recurse forever when that happens """
+    c = TestClient()
+    pkg_conanfile = textwrap.dedent("""
+        from conan import ConanFile
+
+        class Pkg(ConanFile):
+            name = "pkg"
+            version = "1.0"
+
+            def package_info(self):
+                self.cpp_info.components["a"].includedirs = ["include/a"]
+                self.cpp_info.components["a"].requires = ["b"]
+                self.cpp_info.components["b"].includedirs = ["include/b"]
+                self.cpp_info.components["b"].requires = ["a"]
+        """)
+    app_conanfile = textwrap.dedent("""
+        from conan import ConanFile
+
+        class App(ConanFile):
+            requires = "pkg/1.0"
+            generators = "ZigDeps"
+
+            def build(self):
+                self.run("zig build")
+        """)
+    build_zig = textwrap.dedent("""
+        const std = @import("std");
+        const conan_setup = @import("conan_zig_deps/conan_setup.zig");
+
+        pub fn build(b: *std.Build) void {
+            const target = b.standardTargetOptions(.{});
+            const optimize = b.standardOptimizeOption(.{});
+            const mod = b.createModule(.{ .target = target, .optimize = optimize });
+            mod.addCSourceFile(.{ .file = b.path("main.c"), .flags = &.{} });
+            mod.link_libc = true;
+            const exe = b.addExecutable(.{ .name = "app", .root_module = mod });
+            conan_setup.linkDependency(exe, "pkg::a");
+            b.installArtifact(exe);
+        }
+        """)
+    main_c = "int main(void) { return 0; }\n"
+
+    c.save({"pkg/conanfile.py": pkg_conanfile,
+            "conanfile.py": app_conanfile,
+            "build.zig": build_zig,
+            "main.c": main_c})
+    c.run("create pkg")
+    c.run("build .")
