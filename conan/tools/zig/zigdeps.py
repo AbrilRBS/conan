@@ -10,7 +10,23 @@ from conan.tools.files import save
 
 def _zigstr(value):
     """ Escape a value so it can be embedded in a Zig double-quoted string literal """
-    return str(value).replace("\\", "\\\\").replace('"', '\\"')
+    result = []
+    for ch in str(value):
+        if ch == "\\":
+            result.append("\\\\")
+        elif ch == '"':
+            result.append('\\"')
+        elif ch == "\n":
+            result.append("\\n")
+        elif ch == "\r":
+            result.append("\\r")
+        elif ch == "\t":
+            result.append("\\t")
+        elif ord(ch) < 0x20:
+            result.append("\\x%02x" % ord(ch))
+        else:
+            result.append(ch)
+    return "".join(result)
 
 
 class ZigDeps:
@@ -26,7 +42,8 @@ class ZigDeps:
 
     On Windows, since there is no rpath equivalent, linking a shared dependency also copies
     its ``.dll`` next to whatever the consuming step installs (see ``conan_setup.zig``'s
-    ``linkTarget`` for why, and for an alternative if that copy isn't wanted).
+    ``linkTarget`` for why, and for alternatives if that copy isn't wanted - e.g. activating
+    Conan's own ``conanrun`` environment, or a deployer, instead).
     """
 
     def __init__(self, conanfile):
@@ -51,8 +68,16 @@ class ZigDeps:
         for _, dep in self._conanfile.dependencies.host.items():
             self._add_package_targets(dep, targets)
 
+        # A "requires" entry can point at something that was deliberately never turned into a
+        # target (e.g. an executable-only component/package - there's nothing to link there).
+        # Prune those instead of leaving a dangling reference: linkDependency()'s lookup would
+        # otherwise silently no-op on it, which is harmless, but only by accident.
+        for target in targets.values():
+            target["requires"] = [r for r in target["requires"] if r in targets]
+
         direct_targets = [f"{dep.ref.name}::{dep.ref.name}"
                           for _, dep in self._conanfile.dependencies.direct_host.items()]
+        direct_targets = [t for t in direct_targets if t in targets]
 
         env = Environment(trim_blocks=True, lstrip_blocks=True, undefined=StrictUndefined)
         env.filters["zigstr"] = _zigstr
@@ -68,21 +93,26 @@ class ZigDeps:
         components = full_cpp_info.components if has_components else {pkg_name: full_cpp_info}
 
         lib_target_names = []
+        all_target_names = []
         for comp_name, info in components.items():
             if info.exe or not (info.frameworks or info.includedirs or info.libs
                                 or info.system_libs or info.defines or info.requires):
                 continue  # Nothing this target actually contributes
             target_key = f"{pkg_name}::{comp_name}"
             targets[target_key] = self._target_data(dep, info, has_components)
+            all_target_names.append(target_key)
             if info.libs:
                 lib_target_names.append(target_key)
 
         root_key = f"{pkg_name}::{pkg_name}"
-        if root_key not in targets and lib_target_names:
+        if root_key not in targets and all_target_names:
             if full_cpp_info.default_components is not None:
                 requires = [f"{pkg_name}::{c}" for c in full_cpp_info.default_components]
             else:
-                requires = lib_target_names
+                # Prefer the linkable ones, matching CMakeConfigDeps; only fall back to
+                # every contributing component when none of them actually produce a lib
+                # (e.g. a components-based package that's entirely header-only)
+                requires = lib_target_names or all_target_names
             targets[root_key] = self._interface_target(requires)
 
     @staticmethod
@@ -108,7 +138,9 @@ class ZigDeps:
             # Windows has no rpath equivalent: a shared lib's runtime .dll is a different
             # file than the .lib it links against, and must be deployed next to the
             # consumer's executable to be found at all. Expose it so the generated glue can.
-            needs_runtime_path = is_shared and info.link_location and \
+            # Only for that case: rpath already solves discovery whenever it applies (e.g. a
+            # versioned libfoo.so.1.2.3 with a separate libfoo.so link_location for linking).
+            needs_runtime_path = is_shared and not needs_rpath and info.link_location and \
                 info.link_location != info.location
             result["type"] = "SHARED" if is_shared else "STATIC"
             result["lib"] = {
@@ -264,12 +296,22 @@ fn linkTarget(step: *std.Build.Step.Compile, target: conan_deps.Target) void {
             // searched first by Windows' DLL loader.
             //
             // If you'd rather not duplicate the .dll (e.g. to avoid it going stale if the
-            // Conan cache is updated), point your own run step at it directly instead, e.g.:
-            //   const run_cmd = b.addRunArtifact(exe);
-            //   run_cmd.addPathDir(std.fs.path.dirname(runtime_path).?);
-            // using the path from conan_deps.conan_targets directly - but note this only
-            // helps when running via that specific `Step.Run`, not for the built artifact
-            // itself, which is why it isn't done here automatically.
+            // Conan cache is updated), a few alternatives, in roughly increasing order of
+            // how much they take over from this automatic copy:
+            //   - Point your own run step at it directly instead, e.g.:
+            //       const run_cmd = b.addRunArtifact(exe);
+            //       run_cmd.addPathDir(std.fs.path.dirname(runtime_path).?);
+            //     using the path from conan_deps.conan_targets directly - but note this only
+            //     helps when running via that specific `Step.Run`, not for the built artifact
+            //     itself, which is why it isn't done here automatically.
+            //   - Activate the environment Conan itself generates for exactly this purpose
+            //     (conanrunenv, via the "VirtualRunEnv" generator, active by default) before
+            //     running your build: it sets PATH (Windows) / (DY)LD_LIBRARY_PATH (Unix) to
+            //     every dependency's bindirs/libdirs, so nothing needs to be copied at all.
+            //   - Use a Conan deployer (`conan install ... --deploy=runtime_deploy`) to
+            //     physically place every dependency's shared libraries and executables in one
+            //     folder as part of `install`, before `generate()` even runs - a copy, like
+            //     this one, but at the Conan layer instead of the Zig one.
             const b = step.step.owner;
             const basename = std.fs.path.basename(runtime_path);
             const install_dll = b.addInstallFileWithDir(
@@ -279,21 +321,38 @@ fn linkTarget(step: *std.Build.Step.Compile, target: conan_deps.Target) void {
     }
 }
 
-/// Links a single Conan target (a package root, e.g. "zlib::zlib", or one of its
-/// components, e.g. "openssl::ssl") and, transitively, everything it requires.
-pub fn linkDependency(step: *std.Build.Step.Compile, target_name: []const u8) void {
+fn linkDependencyVisited(
+    step: *std.Build.Step.Compile,
+    target_name: []const u8,
+    visited: *std.StringHashMap(void),
+) void {
+    // A "requires" cycle isn't something Conan validates (unlike the package graph itself),
+    // so guard against it here rather than risk an unbounded recursion / stack overflow. This
+    // also means a diamond dependency only gets applied once, instead of once per path to it.
+    if (visited.contains(target_name)) return;
+    visited.put(target_name, {}) catch @panic("OOM");
     const target = conan_deps.conan_targets.get(target_name) orelse return;
     linkTarget(step, target);
     for (target.requires) |req_name| {
-        linkDependency(step, req_name);
+        linkDependencyVisited(step, req_name, visited);
     }
+}
+
+/// Links a single Conan target (a package root, e.g. "zlib::zlib", or one of its
+/// components, e.g. "openssl::ssl") and, transitively, everything it requires.
+pub fn linkDependency(step: *std.Build.Step.Compile, target_name: []const u8) void {
+    var visited = std.StringHashMap(void).init(step.step.owner.allocator);
+    defer visited.deinit();
+    linkDependencyVisited(step, target_name, &visited);
 }
 
 /// Links every direct dependency declared by the consumer (and, transitively, everything
 /// they require).
 pub fn linkDependencies(step: *std.Build.Step.Compile) void {
+    var visited = std.StringHashMap(void).init(step.step.owner.allocator);
+    defer visited.deinit();
     for (conan_deps.direct_targets) |name| {
-        linkDependency(step, name);
+        linkDependencyVisited(step, name, &visited);
     }
 }
 """

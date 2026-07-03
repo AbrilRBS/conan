@@ -39,14 +39,16 @@ def test_zigdeps_simple_package():
     assert '.name = "FOO", .value = "1"' in content
     assert '.name = "BAR", .value = "1"' in content
     assert '"pthread"' in content
-    assert '"pkg::pkg"' in client.load("conan_zig_deps/conan_deps.zig")
 
     setup = client.load("conan_zig_deps/conan_setup.zig")
     assert "pub fn linkDependency(" in setup
     assert "pub fn linkDependencies(" in setup
-    assert "step.xxx" not in setup  # sanity: nothing left calling the old direct-on-step API
-    assert "module.addObjectFile" in setup
-    assert "module.addRPath" in setup
+    # Every mutating call must go through .root_module - these moved off Step.Compile
+    # directly in Zig 0.16 (see std/Build/Module.zig vs the older Step/Compile.zig API)
+    for call in ("addIncludePath", "addObjectFile", "linkSystemLibrary", "linkFramework",
+                "addRPath", "addCMacro"):
+        assert f"step.{call}(" not in setup
+        assert f"module.{call}(" in setup
 
 
 def test_zigdeps_components_own_data_not_merged():
@@ -229,3 +231,238 @@ def test_zigdeps_header_only_no_lib_entry():
     assert ".kind = .INTERFACE" in content
     assert ".lib = null" in content
     assert '.name = "HEADER_ONLY", .value = "1"' in content
+
+
+def test_zigdeps_header_only_components_get_root_target():
+    """ Regression test: a components-based package where NO component produces a lib (all
+    header-only) must still get a "pkg::pkg" root target, aggregating every contributing
+    component - otherwise it's silently missing from linkDependencies()'s direct_targets,
+    even though it's a real direct dependency """
+    client = TestClient()
+    client.save({
+        "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_package_info(cpp_info={
+            "components": {
+                "comp1": {"includedirs": ["include/comp1"], "defines": ["FOO"]},
+                "comp2": {"includedirs": ["include/comp2"]},
+            }
+        }),
+        "conanfile.py": GenConanfile("app", "1.0").with_require("pkg/1.0"),
+    })
+    client.run("create pkg")
+    client.run("install . -g ZigDeps")
+    content = client.load("conan_zig_deps/conan_deps.zig")
+
+    assert '.{ "pkg::pkg"' in content
+    direct_targets_block = content.split("direct_targets")[1].split("conan_targets")[0]
+    assert '"pkg::pkg"' in direct_targets_block
+    root_block = _target_block(content, "pkg::pkg")
+    assert '"pkg::comp1"' in root_block
+    assert '"pkg::comp2"' in root_block
+
+
+def test_zigdeps_dangling_component_reference_pruned():
+    """ Regression test: a "requires" pointing at an exe-only component (which never becomes
+    a target, since there's nothing to link) must be pruned rather than left dangling - the
+    same applies to the analogous package-level (non-component) case """
+    client = TestClient()
+    client.save({
+        "dep/conanfile.py": GenConanfile("dep", "1.0").with_package_info(cpp_info={
+            "components": {
+                "lib": {"libs": ["lib"], "location": '"/fake/dep/lib/liblib.a"',
+                       "type": '"static-library"'},
+                "tool": {"exe": '"mytool"', "location": '"/fake/dep/bin/mytool"'},
+            }
+        }),
+        "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_require("dep/1.0").with_package_info(
+            cpp_info={"requires": ["dep::tool", "dep::lib"]}),
+        "conanfile.py": GenConanfile("app", "1.0").with_require("pkg/1.0"),
+    })
+    client.run("create dep")
+    client.run("create pkg")
+    client.run("install . -g ZigDeps")
+    content = client.load("conan_zig_deps/conan_deps.zig")
+
+    assert "dep::tool" not in content  # never a target: nothing to link for an exe
+    pkg_block = _target_block(content, "pkg::pkg")
+    assert '"dep::lib"' in pkg_block
+    dep_block = _target_block(content, "dep::dep")
+    assert '"dep::lib"' in dep_block  # the auto-created root also excludes the exe component
+
+
+def test_zigdeps_versioned_shared_lib_no_spurious_runtime_path():
+    """ Regression test: a Unix shared lib with a distinct link_location (the common
+    libfoo.so.1.2.3 + libfoo.so link-name pattern) is already fully handled by rpath, and
+    must not also get a (Windows-only-meaningful) runtime_path """
+    client = TestClient()
+    client.save({
+        "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_package_info(cpp_info={
+            "libs": ["mylib"],
+            "location": '"/fake/pkg/lib/libmylib.so.1.2.3"',
+            "link_location": '"/fake/pkg/lib/libmylib.so"',
+            "type": '"shared-library"',
+        }),
+        "conanfile.py": GenConanfile("app", "1.0").with_require("pkg/1.0"),
+    })
+    client.run("create pkg")
+    client.run("install . -g ZigDeps")
+    content = client.load("conan_zig_deps/conan_deps.zig")
+
+    assert '.path = "/fake/pkg/lib/libmylib.so"' in content
+    assert '.rpath_dir = "/fake/pkg/lib"' in content
+    assert ".runtime_path = null" in content
+
+
+def test_zigdeps_control_characters_escaped():
+    """ Regression test: a raw control character (not just backslash/quote) reaching
+    _zigstr must be escaped, or it produces a Zig string literal that fails to compile """
+    client = TestClient()
+    client.save({
+        "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_package_info(
+            cpp_info={"defines": ["WEIRD=a\\nb"]}),
+        "conanfile.py": GenConanfile("app", "1.0").with_require("pkg/1.0"),
+    })
+    client.run("create pkg")
+    client.run("install . -g ZigDeps")
+    content = client.load("conan_zig_deps/conan_deps.zig")
+
+    assert '.value = "a\\\\nb"' in content  # escaped, not a literal raw newline
+    assert "a\nb" not in content
+
+
+def test_zigdeps_linkdependency_cycle_guard_present():
+    """ The generated setup must guard linkDependency's recursion against a "requires" cycle
+    (cpp_info component requires are free-form strings Conan doesn't validate for cycles,
+    unlike the package graph) - see the functional cyclic-requires test for an end-to-end
+    proof this doesn't crash a real `zig build` """
+    client = TestClient()
+    client.save({"conanfile.py": GenConanfile("app", "1.0")})
+    client.run("install . -g ZigDeps")
+    setup = client.load("conan_zig_deps/conan_setup.zig")
+
+    assert "std.StringHashMap" in setup
+    assert "visited.contains" in setup
+
+
+def test_zigdeps_default_components():
+    """ When cpp_info.default_components is set, the root target requires exactly those
+    components - not every lib-producing one """
+    client = TestClient()
+    client.save({
+        "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_package_info(cpp_info={
+            "default_components": ["comp1"],
+            "components": {
+                "comp1": {"libs": ["comp1lib"], "location": '"/fake/pkg/lib/libcomp1lib.a"',
+                         "type": '"static-library"'},
+                "comp2": {"libs": ["comp2lib"], "location": '"/fake/pkg/lib/libcomp2lib.a"',
+                         "type": '"static-library"'},
+            }
+        }),
+        "conanfile.py": GenConanfile("app", "1.0").with_require("pkg/1.0"),
+    })
+    client.run("create pkg")
+    client.run("install . -g ZigDeps")
+    content = client.load("conan_zig_deps/conan_deps.zig")
+
+    root_block = _target_block(content, "pkg::pkg")
+    assert '"pkg::comp1"' in root_block
+    assert '"pkg::comp2"' not in root_block
+
+
+def test_zigdeps_app_dependency_excluded_from_requires():
+    """ A dependency whose cpp_info marks it as an executable (.exe set, regardless of the
+    recipe's own package_type) never becomes a target, so the implicit "link all direct
+    deps" fallback _requires uses for a plain package with no explicit .requires must not
+    leave a dangling reference to it - it doesn't make sense to link an executable """
+    client = TestClient()
+    client.save({
+        "tool/conanfile.py": GenConanfile("tool", "1.0").with_package_info(
+            cpp_info={"exe": '"mytool"', "location": '"/fake/tool/bin/mytool"'}),
+        "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_require("tool/1.0").with_package_info(
+            cpp_info={"libs": ["pkg"], "location": '"/fake/pkg/lib/libpkg.a"',
+                     "type": '"static-library"'}),
+        "conanfile.py": GenConanfile("app", "1.0").with_require("pkg/1.0"),
+    })
+    client.run("create tool")
+    client.run("create pkg")
+    client.run("install . -g ZigDeps")
+    content = client.load("conan_zig_deps/conan_deps.zig")
+
+    assert "tool::tool" not in content
+    pkg_block = _target_block(content, "pkg::pkg")
+    assert "tool" not in pkg_block
+
+
+def test_zigdeps_exe_component_produces_no_target():
+    """ A component with .exe set is entirely omitted from conan_deps.zig - there is nothing
+    to link for an executable """
+    client = TestClient()
+    client.save({
+        "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_package_info(cpp_info={
+            "components": {
+                "lib": {"libs": ["lib"], "location": '"/fake/pkg/lib/liblib.a"',
+                       "type": '"static-library"'},
+                "tool": {"exe": '"mytool"', "location": '"/fake/pkg/bin/mytool"'},
+            }
+        }),
+        "conanfile.py": GenConanfile("app", "1.0").with_require("pkg/1.0"),
+    })
+    client.run("create pkg")
+    client.run("install . -g ZigDeps")
+    content = client.load("conan_zig_deps/conan_deps.zig")
+
+    assert '.{ "pkg::lib"' in content
+    assert "pkg::tool" not in content
+
+
+def test_zigdeps_frameworks():
+    """ Apple frameworks are collected and rendered for linkFramework() to consume """
+    client = TestClient()
+    client.save({
+        "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_package_info(
+            cpp_info={"frameworks": ["CoreFoundation", "Security"]}),
+        "conanfile.py": GenConanfile("app", "1.0").with_require("pkg/1.0"),
+    })
+    client.run("create pkg")
+    client.run("install . -g ZigDeps")
+    content = client.load("conan_zig_deps/conan_deps.zig")
+
+    pkg_block = _target_block(content, "pkg::pkg")
+    assert '"CoreFoundation"' in pkg_block
+    assert '"Security"' in pkg_block
+
+    setup = client.load("conan_zig_deps/conan_setup.zig")
+    assert "module.linkFramework(framework, .{})" in setup
+
+
+def test_zigdeps_explicit_root_requires_on_plain_package():
+    """ A non-components package that sets cpp_info.requires explicitly (rather than relying
+    on the implicit "link all direct deps" fallback) resolves through the same
+    parsed_requires() path a components-based package uses, not the transitive_reqs fallback """
+    client = TestClient()
+    client.save({
+        "dep/conanfile.py": GenConanfile("dep", "1.0").with_package_info(cpp_info={
+            "components": {
+                "used": {"libs": ["used"], "location": '"/fake/dep/lib/libused.a"',
+                         "type": '"static-library"'},
+                "unused": {"libs": ["unused"], "location": '"/fake/dep/lib/libunused.a"',
+                          "type": '"static-library"'},
+            }
+        }),
+        "pkg/conanfile.py": GenConanfile("pkg", "1.0")
+            .with_require("dep/1.0")
+            .with_package_info(cpp_info={
+                "libs": ["pkg"], "location": '"/fake/pkg/lib/libpkg.a"',
+                "type": '"static-library"',
+                "requires": ["dep::used"],  # only "used", not the whole "dep::dep" root
+            }),
+        "conanfile.py": GenConanfile("app", "1.0").with_require("pkg/1.0"),
+    })
+    client.run("create dep")
+    client.run("create pkg")
+    client.run("install . -g ZigDeps")
+    content = client.load("conan_zig_deps/conan_deps.zig")
+
+    pkg_block = _target_block(content, "pkg::pkg")
+    assert '"dep::used"' in pkg_block
+    assert '"dep::dep"' not in pkg_block
+    assert '"dep::unused"' not in pkg_block
