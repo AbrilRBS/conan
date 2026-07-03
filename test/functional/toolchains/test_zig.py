@@ -55,6 +55,33 @@ def _main_c(function_name):
         """) % (function_name, function_name, function_name)
 
 
+def _build_zig_single_target(target_name):
+    """ Like _BUILD_ZIG, but calls linkDependency() for one specific target directly instead
+    of linkDependencies() - which would link every direct dependency wholesale """
+    return textwrap.dedent("""
+        const std = @import("std");
+        const conan_setup = @import("conan_zig_deps/conan_setup.zig");
+
+        pub fn build(b: *std.Build) void {
+            const target = b.standardTargetOptions(.{});
+            const optimize = b.standardOptimizeOption(.{});
+
+            const mod = b.createModule(.{ .target = target, .optimize = optimize });
+            mod.addCSourceFile(.{ .file = b.path("main.c"), .flags = &.{} });
+            mod.link_libc = true;
+
+            const exe = b.addExecutable(.{ .name = "app", .root_module = mod });
+            conan_setup.linkDependency(exe, "%s");
+            b.installArtifact(exe);
+
+            const run_cmd = b.addRunArtifact(exe);
+            run_cmd.step.dependOn(b.getInstallStep());
+            const run_step = b.step("run", "Run the app");
+            run_step.dependOn(&run_cmd.step);
+        }
+        """) % target_name
+
+
 @pytest.mark.slow
 @pytest.mark.tool("zig")
 def test_zigdeps():
@@ -192,16 +219,28 @@ def _shared_link_flags(libname):
     return "-Wl,-soname,lib%s%s" % (libname, _shared_ext())
 
 
+def _export_header(libname, function_name):
+    """ A portable dllexport/dllimport header for a shared library built directly with
+    ``zig cc``: on Windows, symbols aren't exported by default (unlike CMake's
+    WINDOWS_EXPORT_ALL_SYMBOLS), so the .c file defining ``function_name`` must be compiled
+    with ``-D<libname>_EXPORTS`` (matching CMake's own auto-defined macro name) for this to
+    resolve to dllexport there; any other translation unit merely consuming the header
+    (without that define) correctly sees dllimport instead """
+    return textwrap.dedent("""
+        #if defined(_WIN32) && defined(%s_EXPORTS)
+        #define %s_API __declspec(dllexport)
+        #elif defined(_WIN32)
+        #define %s_API __declspec(dllimport)
+        #else
+        #define %s_API
+        #endif
+        %s_API int %s(void);
+        """) % (libname, libname.upper(), libname.upper(), libname.upper(),
+               libname.upper(), function_name)
+
+
 @pytest.mark.slow
 @pytest.mark.tool("zig")
-@pytest.mark.skipif(platform.system() == "Windows",
-                    reason="zig cc doesn't export any symbols from a shared library by "
-                           "default on Windows (unlike CMake's WINDOWS_EXPORT_ALL_SYMBOLS); "
-                           "producing a real portable DLL this way needs explicit "
-                           "__declspec(dllexport) markup this test doesn't add. The actual "
-                           "ZigDeps behavior this exercises (import-lib linking + runtime .dll "
-                           "deployment) is already covered on Windows by "
-                           "test_zigdeps_shared_chain_cmake_deps")
 def test_zigdeps_shared_chain():
     """ A chain of two shared libraries (shareda -> sharedb): both get linked and both need
     their own rpath entry for the resulting binary to find them at runtime """
@@ -219,7 +258,7 @@ def test_zigdeps_shared_chain():
             exports_sources = "sharedb.c", "sharedb.h"
 
             def build(self):
-                self.run("zig cc -shared -fPIC %s -o libsharedb%s sharedb.c")
+                self.run("zig cc -shared -fPIC -Dsharedb_EXPORTS %s -o libsharedb%s sharedb.c")
 
             def package(self):
                 copy(self, "libsharedb%s", self.build_folder,
@@ -243,7 +282,8 @@ def test_zigdeps_shared_chain():
 
             def build(self):
                 dep = self.dependencies["sharedb"].cpp_info
-                self.run('zig cc -c shareda.c -I"' + dep.includedirs[0] + '" -o shareda.o')
+                self.run('zig cc -c -Dshareda_EXPORTS shareda.c -I"'
+                         + dep.includedirs[0] + '" -o shareda.o')
                 self.run('zig cc -shared -fPIC %s -o libshareda%s shareda.o -L"'
                          + dep.libdirs[0] + '" -lsharedb')
 
@@ -256,10 +296,14 @@ def test_zigdeps_shared_chain():
                 self.cpp_info.libs = ["shareda"]
         """) % (_shared_link_flags("shareda"), ext, ext)
 
-    sharedb_h = "int shared_b_value(void);\n"
-    sharedb_c = "int shared_b_value(void) { return 10; }\n"
-    shareda_h = "int shared_a_value(void);\n"
+    sharedb_h = _export_header("sharedb", "shared_b_value")
+    sharedb_c = textwrap.dedent("""
+        #include "sharedb.h"
+        int shared_b_value(void) { return 10; }
+        """)
+    shareda_h = _export_header("shareda", "shared_a_value")
     shareda_c = textwrap.dedent("""
+        #include "shareda.h"
         #include "sharedb.h"
         int shared_a_value(void) { return shared_b_value() + 1; }
         """)
@@ -396,14 +440,6 @@ def test_zigdeps_shared_chain_cmake_deps():
 
 @pytest.mark.slow
 @pytest.mark.tool("zig")
-@pytest.mark.skipif(platform.system() == "Windows",
-                    reason="zig cc doesn't export any symbols from a shared library by "
-                           "default on Windows (unlike CMake's WINDOWS_EXPORT_ALL_SYMBOLS); "
-                           "producing a real portable DLL this way needs explicit "
-                           "__declspec(dllexport) markup this test doesn't add. The actual "
-                           "ZigDeps behavior this exercises (import-lib linking + runtime .dll "
-                           "deployment) is already covered on Windows by "
-                           "test_zigdeps_static_shared_static_chain_cmake_deps")
 def test_zigdeps_static_shared_static_chain():
     """ statictop (static) -> sharedmid (shared) -> staticleaf (static, private/invisible).
     sharedmid statically embeds staticleaf at its own build time, so staticleaf must NOT be
@@ -450,7 +486,8 @@ def test_zigdeps_static_shared_static_chain():
 
             def build(self):
                 dep = self.dependencies["staticleaf"].cpp_info
-                self.run('zig cc -c sharedmid.c -I"' + dep.includedirs[0] + '" -o sharedmid.o')
+                self.run('zig cc -c -Dsharedmid_EXPORTS sharedmid.c -I"'
+                         + dep.includedirs[0] + '" -o sharedmid.o')
                 self.run('zig cc -shared -fPIC %s -o libsharedmid%s sharedmid.o -L"'
                          + dep.libdirs[0] + '" -lstaticleaf')
 
@@ -489,8 +526,9 @@ def test_zigdeps_static_shared_static_chain():
 
     staticleaf_h = "int static_leaf_value(void);\n"
     staticleaf_c = "int static_leaf_value(void) { return 100; }\n"
-    sharedmid_h = "int shared_mid_value(void);\n"
+    sharedmid_h = _export_header("sharedmid", "shared_mid_value")
     sharedmid_c = textwrap.dedent("""
+        #include "sharedmid.h"
         #include "staticleaf.h"
         int shared_mid_value(void) { return static_leaf_value() + 1; }
         """)
@@ -697,3 +735,89 @@ def test_zigdeps_static_shared_static_chain_cmake_deps():
     assert '"statictop::statictop"' in deps_content
     assert '"sharedmid::sharedmid"' in deps_content
     assert "staticleaf" not in deps_content  # private require, invisible to the consumer
+
+
+@pytest.mark.slow
+@pytest.mark.tool("zig")
+def test_zigdeps_link_single_component():
+    """ ``linkDependency()`` can target one specific component directly, instead of using
+    ``linkDependencies()`` (which links every direct dependency of the consumer wholesale) -
+    and that component's own transitive dependency must still be pulled in correctly, even
+    though it isn't the package's root target """
+    c = TestClient()
+    extdep_conanfile = textwrap.dedent("""
+        import os
+        from conan import ConanFile
+        from conan.tools.files import copy
+
+        class ExtDep(ConanFile):
+            name = "extdep"
+            version = "1.0"
+            package_type = "static-library"
+            exports_sources = "extdep.c", "extdep.h"
+
+            def build(self):
+                self.run("zig cc -c extdep.c -o extdep.o")
+                self.run("zig ar rcs libextdep.a extdep.o")
+
+            def package(self):
+                copy(self, "*.a", self.build_folder, os.path.join(self.package_folder, "lib"))
+                copy(self, "*.h", self.build_folder, os.path.join(self.package_folder, "include"))
+
+            def package_info(self):
+                self.cpp_info.libs = ["extdep"]
+        """)
+    multicomp_conanfile = textwrap.dedent("""
+        import os
+        from conan import ConanFile
+        from conan.tools.files import copy
+
+        class MultiComp(ConanFile):
+            name = "multicomp"
+            version = "1.0"
+            package_type = "static-library"
+            requires = "extdep/1.0"
+            exports_sources = "used.c", "used.h", "other.c", "other.h"
+
+            def build(self):
+                dep = self.dependencies["extdep"].cpp_info
+                self.run('zig cc -c used.c -I"' + dep.includedirs[0] + '" -o used.o')
+                self.run("zig cc -c other.c -o other.o")
+                self.run("zig ar rcs libused.a used.o")
+                self.run("zig ar rcs libother.a other.o")
+
+            def package(self):
+                copy(self, "*.a", self.build_folder, os.path.join(self.package_folder, "lib"))
+                copy(self, "*.h", self.build_folder, os.path.join(self.package_folder, "include"))
+
+            def package_info(self):
+                self.cpp_info.components["used"].libs = ["used"]
+                self.cpp_info.components["used"].requires = ["extdep::extdep"]
+                self.cpp_info.components["other"].libs = ["other"]
+        """)
+
+    extdep_h = "int extdep_value(void);\n"
+    extdep_c = "int extdep_value(void) { return 5; }\n"
+    used_h = "int used_value(void);\n"
+    used_c = textwrap.dedent("""
+        #include "extdep.h"
+        int used_value(void) { return extdep_value() + 1; }
+        """)
+    other_h = "int other_value(void);\n"
+    other_c = "int other_value(void) { return 999; }\n"
+
+    c.save({"extdep/conanfile.py": extdep_conanfile,
+            "extdep/extdep.h": extdep_h,
+            "extdep/extdep.c": extdep_c,
+            "multicomp/conanfile.py": multicomp_conanfile,
+            "multicomp/used.h": used_h,
+            "multicomp/used.c": used_c,
+            "multicomp/other.h": other_h,
+            "multicomp/other.c": other_c,
+            "conanfile.py": _app_conanfile("multicomp/1.0"),
+            "build.zig": _build_zig_single_target("multicomp::used"),
+            "main.c": _main_c("used_value")})
+    c.run("create extdep")
+    c.run("create multicomp")
+    c.run("build .")
+    assert "used_value=6" in c.out

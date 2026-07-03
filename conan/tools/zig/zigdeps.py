@@ -23,6 +23,10 @@ class ZigDeps:
     as ``"pkgname::targetname"``, mirroring ``CMakeConfigDeps``: a target only carries its own
     (unmerged) information, and depends on other targets through an explicit ``requires`` list,
     since Zig's build system does not propagate this information transitively on its own.
+
+    On Windows, since there is no rpath equivalent, linking a shared dependency also copies
+    its ``.dll`` next to whatever the consuming step installs (see ``conan_setup.zig``'s
+    ``linkTarget`` for why, and for an alternative if that copy isn't wanted).
     """
 
     def __init__(self, conanfile):
@@ -249,8 +253,23 @@ fn linkTarget(step: *std.Build.Step.Compile, target: conan_deps.Target) void {
             module.addRPath(.{ .cwd_relative = rpath_dir });
         }
         if (lib.runtime_path) |runtime_path| {
-            // No rpath equivalent on Windows: deploy the .dll next to the executable
-            // (matching where std.Build installs it) or it won't be found at runtime.
+            // Windows has no rpath equivalent, so the .dll (as opposed to the .lib used
+            // above to link) has to be made reachable at run time some other way, or the
+            // resulting executable will fail to start with a "missing DLL" error.
+            //
+            // This copies it next to wherever the compile step gets installed (e.g.
+            // zig-out/bin), since that's the one thing guaranteed to work regardless of how
+            // the consumer later runs the result (a "run" step, a copied-out zig-out/,
+            // double-clicking the .exe, ...) - the executable's own directory is always
+            // searched first by Windows' DLL loader.
+            //
+            // If you'd rather not duplicate the .dll (e.g. to avoid it going stale if the
+            // Conan cache is updated), point your own run step at it directly instead, e.g.:
+            //   const run_cmd = b.addRunArtifact(exe);
+            //   run_cmd.addPathDir(std.fs.path.dirname(runtime_path).?);
+            // using the path from conan_deps.conan_targets directly - but note this only
+            // helps when running via that specific `Step.Run`, not for the built artifact
+            // itself, which is why it isn't done here automatically.
             const b = step.step.owner;
             const basename = std.fs.path.basename(runtime_path);
             const install_dll = b.addInstallFileWithDir(
