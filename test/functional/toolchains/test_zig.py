@@ -195,10 +195,13 @@ def _shared_link_flags(libname):
 @pytest.mark.slow
 @pytest.mark.tool("zig")
 @pytest.mark.skipif(platform.system() == "Windows",
-                    reason="Building a portable DLL with zig cc needs extra export handling "
-                           "unrelated to ZigDeps; the Windows import-lib/no-rpath branch is "
-                           "already covered by "
-                           "test_zigdeps_windows_shared_uses_import_lib_no_rpath")
+                    reason="zig cc doesn't export any symbols from a shared library by "
+                           "default on Windows (unlike CMake's WINDOWS_EXPORT_ALL_SYMBOLS); "
+                           "producing a real portable DLL this way needs explicit "
+                           "__declspec(dllexport) markup this test doesn't add. The actual "
+                           "ZigDeps behavior this exercises (import-lib linking + runtime .dll "
+                           "deployment) is already covered on Windows by "
+                           "test_zigdeps_shared_chain_cmake_deps")
 def test_zigdeps_shared_chain():
     """ A chain of two shared libraries (shareda -> sharedb): both get linked and both need
     their own rpath entry for the resulting binary to find them at runtime """
@@ -279,11 +282,6 @@ def test_zigdeps_shared_chain():
 @pytest.mark.slow
 @pytest.mark.tool("cmake")
 @pytest.mark.tool("zig")
-@pytest.mark.skipif(platform.system() == "Windows",
-                    reason="Building a portable DLL with zig needs extra export handling "
-                           "unrelated to ZigDeps; the Windows import-lib/no-rpath branch is "
-                           "already covered by "
-                           "test_zigdeps_windows_shared_uses_import_lib_no_rpath")
 def test_zigdeps_shared_chain_cmake_deps():
     """ Same graph as test_zigdeps_shared_chain, but both shared libraries are built with
     CMake+the system compiler - only the final consumer uses Zig """
@@ -319,6 +317,7 @@ def test_zigdeps_shared_chain_cmake_deps():
         cmake_minimum_required(VERSION 3.15)
         project(sharedb C)
         add_library(sharedb SHARED sharedb.c)
+        set_target_properties(sharedb PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
         install(TARGETS sharedb
                 ARCHIVE DESTINATION lib
                 LIBRARY DESTINATION lib
@@ -361,6 +360,7 @@ def test_zigdeps_shared_chain_cmake_deps():
         project(shareda C)
         find_package(sharedb REQUIRED CONFIG)
         add_library(shareda SHARED shareda.c)
+        set_target_properties(shareda PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
         target_link_libraries(shareda PUBLIC sharedb::sharedb)
         install(TARGETS shareda
                 ARCHIVE DESTINATION lib
@@ -397,10 +397,13 @@ def test_zigdeps_shared_chain_cmake_deps():
 @pytest.mark.slow
 @pytest.mark.tool("zig")
 @pytest.mark.skipif(platform.system() == "Windows",
-                    reason="Building a portable DLL with zig cc needs extra export handling "
-                           "unrelated to ZigDeps; the Windows import-lib/no-rpath branch is "
-                           "already covered by "
-                           "test_zigdeps_windows_shared_uses_import_lib_no_rpath")
+                    reason="zig cc doesn't export any symbols from a shared library by "
+                           "default on Windows (unlike CMake's WINDOWS_EXPORT_ALL_SYMBOLS); "
+                           "producing a real portable DLL this way needs explicit "
+                           "__declspec(dllexport) markup this test doesn't add. The actual "
+                           "ZigDeps behavior this exercises (import-lib linking + runtime .dll "
+                           "deployment) is already covered on Windows by "
+                           "test_zigdeps_static_shared_static_chain_cmake_deps")
 def test_zigdeps_static_shared_static_chain():
     """ statictop (static) -> sharedmid (shared) -> staticleaf (static, private/invisible).
     sharedmid statically embeds staticleaf at its own build time, so staticleaf must NOT be
@@ -524,11 +527,6 @@ def test_zigdeps_static_shared_static_chain():
 @pytest.mark.slow
 @pytest.mark.tool("cmake")
 @pytest.mark.tool("zig")
-@pytest.mark.skipif(platform.system() == "Windows",
-                    reason="Building a portable DLL with zig needs extra export handling "
-                           "unrelated to ZigDeps; the Windows import-lib/no-rpath branch is "
-                           "already covered by "
-                           "test_zigdeps_windows_shared_uses_import_lib_no_rpath")
 def test_zigdeps_static_shared_static_chain_cmake_deps():
     """ Same graph as test_zigdeps_static_shared_static_chain, but all 3 dependencies are
     built with CMake+the system compiler - only the final consumer uses Zig """
@@ -609,6 +607,7 @@ def test_zigdeps_static_shared_static_chain_cmake_deps():
         project(sharedmid C)
         find_package(staticleaf REQUIRED CONFIG)
         add_library(sharedmid SHARED sharedmid.c)
+        set_target_properties(sharedmid PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
         target_link_libraries(sharedmid PRIVATE staticleaf::staticleaf)
         install(TARGETS sharedmid
                 ARCHIVE DESTINATION lib

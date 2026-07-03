@@ -101,11 +101,17 @@ class ZigDeps:
             is_shared = info.type is PackageType.SHARED
             link_path = info.link_location or info.location
             needs_rpath = is_shared and not info.location.endswith(".dll")
+            # Windows has no rpath equivalent: a shared lib's runtime .dll is a different
+            # file than the .lib it links against, and must be deployed next to the
+            # consumer's executable to be found at all. Expose it so the generated glue can.
+            needs_runtime_path = is_shared and info.link_location and \
+                info.link_location != info.location
             result["type"] = "SHARED" if is_shared else "STATIC"
             result["lib"] = {
                 "path": link_path.replace("\\", "/"),
                 "rpath_dir": os.path.dirname(info.location).replace("\\", "/")
                 if needs_rpath else None,
+                "runtime_path": info.location.replace("\\", "/") if needs_runtime_path else None,
             }
         return result
 
@@ -156,6 +162,7 @@ const std = @import("std");
 pub const Lib = struct {
     path: []const u8,
     rpath_dir: ?[]const u8,
+    runtime_path: ?[]const u8,
 };
 
 pub const Define = struct {
@@ -201,6 +208,11 @@ pub const conan_targets = std.StaticStringMap(Target).initComptime(.{
 {% else %}
             .rpath_dir = null,
 {% endif %}
+{% if t.lib.runtime_path %}
+            .runtime_path = "{{ t.lib.runtime_path | zigstr }}",
+{% else %}
+            .runtime_path = null,
+{% endif %}
         },
 {% else %}
         .lib = null,
@@ -235,6 +247,15 @@ fn linkTarget(step: *std.Build.Step.Compile, target: conan_deps.Target) void {
         module.addObjectFile(.{ .cwd_relative = lib.path });
         if (lib.rpath_dir) |rpath_dir| {
             module.addRPath(.{ .cwd_relative = rpath_dir });
+        }
+        if (lib.runtime_path) |runtime_path| {
+            // No rpath equivalent on Windows: deploy the .dll next to the executable
+            // (matching where std.Build installs it) or it won't be found at runtime.
+            const b = step.step.owner;
+            const basename = std.fs.path.basename(runtime_path);
+            const install_dll = b.addInstallFileWithDir(
+                .{ .cwd_relative = runtime_path }, .bin, basename);
+            b.getInstallStep().dependOn(&install_dll.step);
         }
     }
 }

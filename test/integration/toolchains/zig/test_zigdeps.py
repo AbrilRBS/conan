@@ -165,7 +165,10 @@ def test_zigdeps_transitive_chain():
 
 def test_zigdeps_windows_shared_uses_import_lib_no_rpath():
     """ A Windows shared lib must link against the import lib (.lib), not the .dll, and must
-    not get an rpath (rpath is a Unix ELF/Mach-O concept, meaningless for .dll loading) """
+    not get an rpath (rpath is a Unix ELF/Mach-O concept, meaningless for .dll loading) - but
+    the .dll's own location must still be exposed as ``runtime_path``, since Windows has no
+    rpath equivalent at all: without it, a consumer has no way to deploy the .dll next to
+    their executable and the resulting binary would fail to find it at runtime """
     client = TestClient()
     client.save({
         "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_package_info(cpp_info={
@@ -182,8 +185,8 @@ def test_zigdeps_windows_shared_uses_import_lib_no_rpath():
 
     assert ".kind = .SHARED" in content
     assert '.path = "C:/pkg/lib/mylib.lib"' in content
-    assert "mylib.dll" not in content
     assert ".rpath_dir = null" in content
+    assert '.runtime_path = "C:/pkg/bin/mylib.dll"' in content
 
 
 def test_zigdeps_unix_shared_gets_rpath():
@@ -206,6 +209,7 @@ def test_zigdeps_unix_shared_gets_rpath():
     assert ".kind = .SHARED" in content
     assert '.path = "/fake/pkg/lib/libmylib.so"' in content
     assert '.rpath_dir = "/fake/pkg/lib"' in content
+    assert ".runtime_path = null" in content  # rpath already solves discovery on Unix
 
 
 def test_zigdeps_header_only_no_lib_entry():
