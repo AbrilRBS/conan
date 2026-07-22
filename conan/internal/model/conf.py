@@ -9,6 +9,7 @@ import textwrap
 
 from jinja2 import Environment, FileSystemLoader
 
+from conan.api.output import ConanOutput
 from conan.errors import ConanException
 from conan.internal.api.detect import detect_api
 from conan.internal.cache.home_paths import HomePaths
@@ -188,6 +189,9 @@ _BUILT_IN_CONFS_TYPES = {
 CORE_CONF_PATTERN = re.compile(r"^(core\..+|core):.*")
 TOOLS_CONF_PATTERN = re.compile(r"^(tools\..+|tools):.*")
 USER_CONF_PATTERN = re.compile(r"^(user\..+|user):.*")
+# Characters allowed in a user conf name (besides the '.'/':' separators): lowercase alphanumeric,
+# underscore and hyphen. Anything else is deprecated and will become an error in a future release.
+_USER_CONF_DEPRECATED_CHARS = re.compile(r"[^a-z0-9_.:-]")
 
 
 def _is_profile_module(module_name):
@@ -370,6 +374,10 @@ class Conf:
     def validate(self):
         for conf in self._values:
             self._check_conf_name(conf)
+            if conf.startswith("user") and _USER_CONF_DEPRECATED_CHARS.search(conf):
+                ConanOutput().warning(
+                    f"User conf '{conf}' uses characters outside 'a-z0-9_-'. This is deprecated "
+                    "and will become an error in a future release.", warn_tag="deprecated")
 
     def items(self):
         # FIXME: Keeping backward compatibility
@@ -601,7 +609,7 @@ class Conf:
 
 
 class ConfDefinition:
-    # Order is important, "define" must be latest
+    # loads() selects the leftmost/longest operator, so declaration order is not significant
     actions = (("+=", "append"), ("=+", "prepend"),
                ("=!", "unset"), ("=~", "unset"), ("*=", "update"), ("=", "define"))
 
@@ -763,19 +771,24 @@ class ConfDefinition:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
+            # The separator is the LEFTMOST operator occurrence; ties (operators starting at the
+            # same position, e.g. "=" vs "=+") are broken by the longest match. This stops
+            # operator-like substrings inside the value (e.g. "user:x=CFLAGS+=-O2") from being
+            # mistaken for the separator.
+            candidates = []
             for op, method in ConfDefinition.actions:
-                tokens = line.split(op, 1)
-                if len(tokens) != 2:
-                    continue
-                pattern_name, value = tokens
-                _, name = self._split_pattern_name(pattern_name)
-                # We only implement str type at the moment
-                isstr = _BUILT_IN_CONFS_TYPES.get(name) is str
-                parsed_value = value.strip() if isstr else ConfDefinition._get_evaluated_value(value)
-                self.update(pattern_name, parsed_value, profile=profile, method=method)
-                break
-            else:
+                pos = line.find(op)
+                if pos != -1:
+                    candidates.append((pos, -len(op), op, method))
+            if not candidates:
                 raise ConanException("Bad conf definition: {}".format(line))
+            _, _, op, method = min(candidates)
+            pattern_name, value = line.split(op, 1)
+            _, name = self._split_pattern_name(pattern_name)
+            # We only implement str type at the moment
+            isstr = _BUILT_IN_CONFS_TYPES.get(name) is str
+            parsed_value = value.strip() if isstr else ConfDefinition._get_evaluated_value(value)
+            self.update(pattern_name, parsed_value, profile=profile, method=method)
 
     def validate(self):
         for conf in self._pattern_confs.values():

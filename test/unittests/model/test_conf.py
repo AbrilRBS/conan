@@ -5,6 +5,8 @@ import pytest
 from conan.api.model import RecipeReference
 from conan.errors import ConanException
 from conan.internal.model.conf import ConfDefinition
+from conan.test.utils.mocks import RedirectedTestOutput
+from conan.test.utils.tools import redirect_output
 
 
 @pytest.fixture()
@@ -167,6 +169,42 @@ def test_parse_spaces():
     c = ConfDefinition()
     c.loads(text)
     assert c.get("core:non_interactive") == "minimal"
+
+
+@pytest.mark.parametrize("text, name, expected", [
+    ("user.foo:flags=CFLAGS+=-O2", "user.foo:flags", "CFLAGS+=-O2"),
+    ("user.foo:x=a=!b", "user.foo:x", "a=!b"),
+    ("user.foo:y=a*=b", "user.foo:y", "a*=b"),
+])
+def test_conf_operator_substring_in_value(text, name, expected):
+    # An operator-like substring inside the value must not be taken as the separator:
+    # loads() picks the LEFTMOST operator, so the leading "=" wins over a later "+="/"=!"/"*=".
+    c = ConfDefinition()
+    c.loads(text)
+    assert c.get(name) == expected
+
+
+def test_user_conf_name_deprecated_chars():
+    # Non-breaking: a user conf name with characters outside [a-z0-9_-] still loads and is
+    # usable, but validate() emits a deprecation warning.
+    c = ConfDefinition()
+    c.loads("user.foo:bar@baz=value")
+    assert c.get("user.foo:bar@baz") == "value"
+    out = RedirectedTestOutput()
+    with redirect_output(out):
+        c.validate()
+    assert "deprecated" in out
+    assert "user.foo:bar@baz" in out
+
+
+def test_user_conf_name_allowed_chars_no_warning():
+    # Lowercase alphanumeric plus '_' and '-' (and the '.'/':' separators) are allowed silently.
+    c = ConfDefinition()
+    c.loads("user.my-org.sub_group:my_conf-name=value")
+    out = RedirectedTestOutput()
+    with redirect_output(out):
+        c.validate()
+    assert "deprecated" not in out
 
 
 @pytest.mark.parametrize("text, expected", [
