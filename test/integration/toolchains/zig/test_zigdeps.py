@@ -681,3 +681,76 @@ def test_zigdeps_default_components_skipping_missing():
 
     assert '"pkg::lib"' in root_block
     assert "pkg::tool" not in root_block  # skipped, so not referenced
+
+
+def test_zigdeps_libc_always_requested():
+    """ Every Conan C/C++ package is built against libc, and Zig does not infer that from an
+    object file - without it a dependency's own headers fail on things like malloc """
+    client = TestClient()
+    client.save({
+        "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_package_info(
+            cpp_info={"libs": ["pkg"], "location": '"/fake/pkg/lib/libpkg.a"',
+                     "type": '"static-library"'}),
+        "conanfile.py": GenConanfile("app", "1.0").with_require("pkg/1.0"),
+    })
+    client.run("create pkg")
+    client.run("install . -g ZigDeps")
+
+    assert ".link_libc = true" in _target_block(
+        client.load("conan_zig_deps/conan_deps.zig"), "pkg::pkg")
+    assert "module.link_libc = true" in client.load("conan_zig_deps/conan_setup.zig")
+
+
+def test_zigdeps_cpp_detected_from_libcxx_when_languages_unset():
+    """ Most recipes still do not declare ``languages``, so compiler.libcxx is the fallback
+    signal: Conan only keeps that setting for C++ packages. An explicit ``languages`` wins
+    over it in both directions. """
+    client = TestClient()
+    client.save({
+        # No languages declared -> falls back to libcxx, which the profile defines
+        "cpppkg/conanfile.py": GenConanfile("cpppkg", "1.0")
+            .with_settings("os", "compiler", "build_type", "arch")
+            .with_package_info(cpp_info={"libs": ["cpppkg"],
+                                         "location": '"/fake/cpppkg/lib/libcpppkg.a"',
+                                         "type": '"static-library"'}),
+        # Declares itself C, so it must NOT get the C++ runtime even though the profile
+        # still carries compiler.libcxx
+        "cpkg/conanfile.py": GenConanfile("cpkg", "1.0")
+            .with_settings("os", "compiler", "build_type", "arch")
+            .with_class_attribute('languages = "C"')
+            .with_package_info(cpp_info={"libs": ["cpkg"],
+                                         "location": '"/fake/cpkg/lib/libcpkg.a"',
+                                         "type": '"static-library"'}),
+        "conanfile.py": GenConanfile("app", "1.0").with_settings(
+            "os", "compiler", "build_type", "arch")
+            .with_require("cpppkg/1.0").with_require("cpkg/1.0"),
+    })
+    client.run("create cpppkg")
+    client.run("create cpkg")
+    client.run("install . -g ZigDeps")
+    content = client.load("conan_zig_deps/conan_deps.zig")
+
+    assert ".link_cpp = true" in _target_block(content, "cpppkg::cpppkg")
+    assert ".link_cpp = false" in _target_block(content, "cpkg::cpkg")
+
+
+def test_zigdeps_tool_requires_bindirs_exposed():
+    """ Real tool recipes rarely declare cpp_info.exe, so their bindirs are what is actually
+    available - exposed so a build.zig can resolve a tool without relying on PATH """
+    client = TestClient()
+    client.save({
+        "tool/conanfile.py": GenConanfile("tool", "1.0").with_package_type("application"),
+        "conanfile.py": GenConanfile("app", "1.0").with_tool_requires("tool/1.0"),
+    })
+    client.run("create tool")
+    client.run("install . -g ZigDeps")
+    content = client.load("conan_zig_deps/conan_deps.zig")
+
+    tool_dirs = content.split("conan_tool_dirs")[1].split("conan_targets")[0]
+    assert '"tool"' in tool_dirs
+    assert "/bin" in tool_dirs
+    # A tool_requires is build context: nothing to link, so no target for it
+    assert "tool::tool" not in _targets_section(content)
+
+    setup = client.load("conan_zig_deps/conan_setup.zig")
+    assert "pub fn toolPath(" in setup

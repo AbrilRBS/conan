@@ -86,9 +86,17 @@ class ZigDeps:
             full_cpp_info = dep.cpp_info.deduce_full_cpp_info(dep)
             self._add_package_targets(require, dep, full_cpp_info, targets, flag_deps)
             self._add_package_exes(dep, full_cpp_info, exes)
-        # tool_requires: nothing to link, but their executables are worth exposing
+        # tool_requires: nothing to link, but a build.zig needs to be able to find the
+        # executables. Most tool recipes do not declare cpp_info.exe, so their bindirs are
+        # what is actually available - Conan itself relies on those, via PATH.
+        tool_dirs = {}
         for _, dep in self._conanfile.dependencies.build.items():
-            self._add_package_exes(dep, dep.cpp_info.deduce_full_cpp_info(dep), exes)
+            full_cpp_info = dep.cpp_info.deduce_full_cpp_info(dep)
+            self._add_package_exes(dep, full_cpp_info, exes)
+            bindirs = [d.replace("\\", "/")
+                       for d in full_cpp_info.aggregated_components().bindirs]
+            if bindirs:
+                tool_dirs[dep.ref.name] = bindirs
 
         # A "requires" entry can point at something that was deliberately never turned into a
         # target (e.g. an executable-only component - there's nothing to link there). Prune
@@ -113,6 +121,7 @@ class ZigDeps:
         deps_template = env.from_string(_CONAN_DEPS_TEMPLATE)
         context = {"targets": dict(sorted(targets.items())),
                    "exes": dict(sorted(exes.items())),
+                   "tool_dirs": dict(sorted(tool_dirs.items())),
                    "direct_targets": direct_targets}
         return {"conan_deps.zig": deps_template.render(context),
                 "conan_setup.zig": _CONAN_SETUP_ZIG}
@@ -162,8 +171,8 @@ class ZigDeps:
     def _empty_target():
         return {"type": "interface", "include_paths": [], "defines": [], "system_libs": [],
                 "frameworks": [], "framework_paths": [], "objects": [], "cflags": [],
-                "cxxflags": [], "link_flags": [], "lib": None, "link_cpp": False,
-                "requires": []}
+                "cxxflags": [], "link_flags": [], "lib": None, "link_libc": False,
+                "link_cpp": False, "requires": []}
 
     @classmethod
     def _interface_target(cls, requires):
@@ -171,9 +180,39 @@ class ZigDeps:
         result["requires"] = requires
         return result
 
+    @staticmethod
+    def _is_cpp(dep, info):
+        """ Whether a dependency needs the C++ runtime linked into its consumer.
+
+        ``languages`` is authoritative in both directions when the recipe declares it, so a
+        package saying ``languages = "C"`` never gets the C++ runtime. It is a newer
+        attribute that most packages still leave unset, though, so it cannot be the only
+        signal: ``compiler.libcxx`` is the fallback, since Conan only keeps that setting for
+        C++ packages - a C recipe drops it (``settings.rm_safe("compiler.libcxx")``) so its
+        binaries are not specialised per C++ standard library.
+
+        CMakeConfigDeps emits nothing at all when ``languages`` is unset, and lets CMake
+        infer linkage from the consumer's own ``project()`` languages. Zig has no equivalent,
+        which is why there is a fallback here at all. It is still not exhaustive: a
+        header-only C++ package that clears its settings looks identical to a C one, so a
+        consumer of such a package has to set ``link_libcpp`` itself - exactly as it would
+        have to with CMake.
+        """
+        languages = info.languages or dep.languages or []
+        if languages:
+            return "C++" in languages
+        return bool(dep.settings.get_safe("compiler.libcxx"))
+
     def _target_data(self, require, dep, info, has_components):
         result = self._empty_target()
         result["requires"] = self._requires(dep, info, has_components)
+        # Every Conan C/C++ package is built against libc, and Zig does not infer that from
+        # an object file - without it the dependency's own headers fail on things like
+        # malloc. (Zig only auto-detects libc from system_libs named "m", "pthread", ...)
+        result["link_libc"] = True
+        # Not gated on there being a library: the C++ runtime is needed to compile against a
+        # header-only C++ dependency too
+        result["link_cpp"] = self._is_cpp(dep, info)
         result["system_libs"] = list(info.system_libs)
         result["frameworks"] = list(info.frameworks)
         result["framework_paths"] = [p.replace("\\", "/") for p in info.frameworkdirs]
@@ -202,11 +241,6 @@ class ZigDeps:
                 link_path = info.link_location or info.location
                 result["type"] = "shared" if is_shared else "static"
                 result["lib"] = link_path.replace("\\", "/")
-                # A C++ dependency needs the C++ runtime linked into the consumer, or it
-                # fails with undefined std:: symbols. Same source CMakeConfigDeps uses for
-                # its link_languages, and the same component-then-package fallback.
-                languages = info.languages or dep.languages or []
-                result["link_cpp"] = "C++" in languages
         return result
 
     @staticmethod
@@ -282,7 +316,8 @@ pub const Target = struct {
     /// Path of the library to link, if this target produces one. For a shared library on
     /// Windows this is the import library, not the runtime .dll.
     lib: ?[]const u8,
-    /// Whether this target is C++, and therefore needs the C++ runtime linked in.
+    /// Whether the consumer needs libc / the C++ runtime linked in for this target.
+    link_libc: bool,
     link_cpp: bool,
     /// Compiler and linker flags the dependency declares. Zig has no injection point for
     /// these - a dependency cannot add flags to sources it does not own - so they are NOT
@@ -307,6 +342,15 @@ pub const conan_exes = std.StaticStringMap([]const u8).initComptime(.{
 {% endfor %}
 });
 
+/// Directories holding the executables of build-context dependencies (tool_requires), by
+/// package name. Conan exposes tools through PATH; this is the same information, so a
+/// build.zig can locate one without depending on the ambient environment.
+pub const conan_tool_dirs = std.StaticStringMap([]const []const u8).initComptime(.{
+{% for name, dirs in tool_dirs.items() %}
+    .{ "{{ name | zigstr }}", &.{ {% for d in dirs %}"{{ d | zigstr }}", {% endfor %} } },
+{% endfor %}
+});
+
 pub const conan_targets = std.StaticStringMap(Target).initComptime(.{
 {% for name, t in targets.items() %}
     .{ "{{ name | zigstr }}", Target{
@@ -326,6 +370,7 @@ pub const conan_targets = std.StaticStringMap(Target).initComptime(.{
 {% else %}
         .lib = null,
 {% endif %}
+        .link_libc = {{ "true" if t.link_libc else "false" }},
         .link_cpp = {{ "true" if t.link_cpp else "false" }},
         .cflags = &.{ {% for f in t.cflags %}"{{ f | zigstr }}", {% endfor %} },
         .cxxflags = &.{ {% for f in t.cxxflags %}"{{ f | zigstr }}", {% endfor %} },
@@ -387,6 +432,9 @@ fn linkTarget(module: *Module, target: conan_deps.Target) void {
     if (target.lib) |lib| {
         module.addObjectFile(.{ .cwd_relative = lib });
     }
+    if (target.link_libc) {
+        module.link_libc = true;
+    }
     if (target.link_cpp) {
         module.link_libcpp = true;
     }
@@ -432,13 +480,29 @@ pub fn linkDependencies(module: *Module) void {
     }
 }
 
-/// Absolute path of an executable provided by a dependency, e.g. a tool_require's compiler
-/// or code generator. Use with b.addSystemCommand(&.{ conan.exePath("protoc::protoc") }).
+/// Absolute path of an executable a dependency declares through cpp_info.exe, keyed
+/// "pkg::name". Note most tool recipes do not declare it - prefer toolPath() for those.
 pub fn exePath(name: []const u8) []const u8 {
     return conan_deps.conan_exes.get(name) orelse {
         std.debug.print("conan: unknown executable '{s}'\\n", .{name});
         @panic("conan: unknown executable");
     };
+}
+
+/// Absolute path of a tool_requires executable, e.g.
+/// b.addSystemCommand(&.{ conan.toolPath(b, "flex", "flex") }). Resolved inside the
+/// package's own bindir rather than through PATH, so the build does not silently pick up a
+/// different copy of the tool from the ambient environment. If a package ships more than
+/// one bindir, read conan_deps.conan_tool_dirs directly.
+pub fn toolPath(b: *std.Build, pkg: []const u8, exe_name: []const u8) []const u8 {
+    const dirs = conan_deps.conan_tool_dirs.get(pkg) orelse {
+        std.debug.print("conan: '{s}' is not a tool_requires of this recipe. Available:\\n", .{pkg});
+        for (conan_deps.conan_tool_dirs.keys()) |available| {
+            std.debug.print("  {s}\\n", .{available});
+        }
+        @panic("conan: unknown tool package");
+    };
+    return b.pathJoin(&.{ dirs[0], exe_name });
 }
 
 // NOTE ON RUNTIME DISCOVERY
