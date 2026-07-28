@@ -4,6 +4,16 @@ from conan.test.assets.genconanfile import GenConanfile
 from conan.test.utils.tools import TestClient
 
 
+def _targets_section(content):
+    """ Only the conan_targets map. Executables live in a separate conan_exes map, so
+    'is this name absent' assertions must not accidentally match there (or vice versa) """
+    return content.split("pub const conan_targets")[1]
+
+
+def _exes_section(content):
+    return content.split("pub const conan_exes")[1].split("pub const conan_targets")[0]
+
+
 def _target_block(content, target_name):
     """ Extract a single target's own ``Target{ ... }`` body, so assertions can check that
     data isn't leaking between targets (matching on a bare "pkg::name" substring is not
@@ -33,21 +43,25 @@ def test_zigdeps_simple_package():
     content = client.load("conan_zig_deps/conan_deps.zig")
 
     assert content.count('.{ "pkg::pkg"') == 1
-    assert '.kind = .STATIC' in content
+    assert '.kind = .static' in content
     assert '.lib = "/fake/pkg/lib/libmylib.a"' in content
     assert '.name = "FOO", .value = "1"' in content
     assert '.name = "BAR", .value = "1"' in content
     assert '"pthread"' in content
 
     setup = client.load("conan_zig_deps/conan_setup.zig")
-    assert "pub fn linkDependency(" in setup
-    assert "pub fn linkDependencies(" in setup
-    # Every mutating call must go through .root_module - these moved off Step.Compile
-    # directly in Zig 0.16 (see std/Build/Module.zig vs the older Step/Compile.zig API)
-    for call in ("addIncludePath", "addObjectFile", "linkSystemLibrary", "linkFramework",
-                "addCMacro"):
-        assert f"step.{call}(" not in setup
+    # The public API operates on a *std.Build.Module: in Zig 0.16 every call used here
+    # exists only on Module, not on Step.Compile, and a Module is not necessarily an
+    # artifact's root module
+    assert "pub fn linkDependency(module: *Module" in setup
+    assert "pub fn linkDependencies(module: *Module" in setup
+    for call in ("addSystemIncludePath", "addObjectFile", "linkSystemLibrary",
+                "linkFramework", "addCMacro", "addFrameworkPath"):
         assert f"module.{call}(" in setup
+    # Dependency headers are -isystem, so their warnings aren't the consumer's problem
+    assert "module.addIncludePath(" not in setup
+    # Conan already resolved what to link; don't let pkg-config override it
+    assert ".use_pkg_config = .no" in setup
     # Runtime discovery is deliberately Conan's job (conanrun), not the generator's
     assert "addRPath" not in setup
     assert "addInstallFileWithDir" not in setup
@@ -94,7 +108,7 @@ def test_zigdeps_components_own_data_not_merged():
     root_block = _target_block(content, "pkg::pkg")
     assert '"pkg::comp1"' in root_block
     assert '"pkg::comp2"' in root_block
-    assert ".kind = .INTERFACE" in root_block
+    assert ".kind = .interface" in root_block
 
 
 def test_zigdeps_cross_package_component_requires():
@@ -185,7 +199,7 @@ def test_zigdeps_windows_shared_links_import_lib():
     client.run("install . -g ZigDeps")
     content = client.load("conan_zig_deps/conan_deps.zig")
 
-    assert ".kind = .SHARED" in content
+    assert ".kind = .shared" in content
     assert '.lib = "C:/pkg/lib/mylib.lib"' in content
     assert "mylib.dll" not in content
 
@@ -206,7 +220,7 @@ def test_zigdeps_unix_shared_links_library_no_rpath():
     client.run("install . -g ZigDeps")
     content = client.load("conan_zig_deps/conan_deps.zig")
 
-    assert ".kind = .SHARED" in content
+    assert ".kind = .shared" in content
     assert '.lib = "/fake/pkg/lib/libmylib.so"' in content
     assert "rpath" not in content
 
@@ -225,7 +239,7 @@ def test_zigdeps_header_only_no_lib_entry():
     content = client.load("conan_zig_deps/conan_deps.zig")
 
     assert '.{ "pkg::pkg"' in content
-    assert ".kind = .INTERFACE" in content
+    assert ".kind = .interface" in content
     assert ".lib = null" in content
     assert '.name = "HEADER_ONLY", .value = "1"' in content
 
@@ -279,7 +293,8 @@ def test_zigdeps_dangling_component_reference_pruned():
     client.run("install . -g ZigDeps")
     content = client.load("conan_zig_deps/conan_deps.zig")
 
-    assert "dep::tool" not in content  # never a target: nothing to link for an exe
+    assert "dep::tool" not in _targets_section(content)  # nothing to link for an exe
+    assert '"dep::tool"' in _exes_section(content)  # but its path is still exposed
     pkg_block = _target_block(content, "pkg::pkg")
     assert '"dep::lib"' in pkg_block
     dep_block = _target_block(content, "dep::dep")
@@ -313,16 +328,19 @@ def test_zigdeps_control_characters_escaped():
     _zigstr must be escaped, or it produces a Zig string literal that fails to compile """
     client = TestClient()
     client.save({
+        # A real newline, not the two characters backslash-n: GenConanfile reprs this into
+        # the generated recipe, which parses it back to an actual control character
         "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_package_info(
-            cpp_info={"defines": ["WEIRD=a\\nb"]}),
+            cpp_info={"defines": ["WEIRD=a\nb"]}),
         "conanfile.py": GenConanfile("app", "1.0").with_require("pkg/1.0"),
     })
     client.run("create pkg")
     client.run("install . -g ZigDeps")
     content = client.load("conan_zig_deps/conan_deps.zig")
 
-    assert '.value = "a\\\\nb"' in content  # escaped, not a literal raw newline
-    assert "a\nb" not in content
+    # Escaped into a valid Zig literal, rather than breaking the line in two
+    assert '.value = "a\\nb"' in content
+    assert '.value = "a' + chr(10) not in content
 
 
 def test_zigdeps_linkdependency_cycle_guard_present():
@@ -383,7 +401,7 @@ def test_zigdeps_app_dependency_excluded_from_requires():
     client.run("install . -g ZigDeps")
     content = client.load("conan_zig_deps/conan_deps.zig")
 
-    assert "tool::tool" not in content
+    assert "tool::tool" not in _targets_section(content)
     pkg_block = _target_block(content, "pkg::pkg")
     assert "tool" not in pkg_block
 
@@ -407,7 +425,8 @@ def test_zigdeps_exe_component_produces_no_target():
     content = client.load("conan_zig_deps/conan_deps.zig")
 
     assert '.{ "pkg::lib"' in content
-    assert "pkg::tool" not in content
+    assert "pkg::tool" not in _targets_section(content)
+    assert '"pkg::tool"' in _exes_section(content)  # exposed as an executable path instead
 
 
 def test_zigdeps_frameworks():
@@ -462,3 +481,203 @@ def test_zigdeps_explicit_root_requires_on_plain_package():
     assert '"dep::used"' in pkg_block
     assert '"dep::dep"' not in pkg_block
     assert '"dep::unused"' not in pkg_block
+
+
+def test_zigdeps_experimental_warning():
+    """ Like every other recently added generator, ZigDeps announces that it is experimental """
+    client = TestClient()
+    client.save({"conanfile.py": GenConanfile("app", "1.0")})
+    client.run("install . -g ZigDeps")
+    assert "ZigDeps is experimental" in client.out
+
+
+def test_zigdeps_cpp_dependency_links_cpp_runtime():
+    """ A C++ dependency must ask for the C++ runtime, or the consumer fails to link with
+    undefined std:: symbols. A C dependency must not. """
+    client = TestClient()
+    client.save({
+        "cpppkg/conanfile.py": GenConanfile("cpppkg", "1.0")
+            .with_class_attribute('languages = "C++"')
+            .with_package_info(cpp_info={"libs": ["cpppkg"],
+                                         "location": '"/fake/cpppkg/lib/libcpppkg.a"',
+                                         "type": '"static-library"'}),
+        "cpkg/conanfile.py": GenConanfile("cpkg", "1.0").with_package_info(
+            cpp_info={"libs": ["cpkg"], "location": '"/fake/cpkg/lib/libcpkg.a"',
+                     "type": '"static-library"'}),
+        "conanfile.py": GenConanfile("app", "1.0").with_require("cpppkg/1.0")
+            .with_require("cpkg/1.0"),
+    })
+    client.run("create cpppkg")
+    client.run("create cpkg")
+    client.run("install . -g ZigDeps")
+    content = client.load("conan_zig_deps/conan_deps.zig")
+
+    assert ".link_cpp = true" in _target_block(content, "cpppkg::cpppkg")
+    assert ".link_cpp = false" in _target_block(content, "cpkg::cpkg")
+
+
+def test_zigdeps_requirement_traits_headers_and_libs():
+    """ headers=False must keep the dependency's include dirs and defines out of the
+    consumer, and libs=False must keep its library from being linked """
+    client = TestClient()
+    client.save({
+        "dep/conanfile.py": GenConanfile("dep", "1.0").with_package_info(cpp_info={
+            "libs": ["dep"], "location": '"/fake/dep/lib/libdep.a"',
+            "type": '"static-library"', "defines": ["DEP_DEFINE"],
+        }),
+        "conanfile.py": GenConanfile("app", "1.0").with_requirement(
+            "dep/1.0", headers=False, libs=False),
+    })
+    client.run("create dep")
+    client.run("install . -g ZigDeps")
+    block = _target_block(client.load("conan_zig_deps/conan_deps.zig"), "dep::dep")
+
+    assert "DEP_DEFINE" not in block             # headers=False -> no defines
+    assert ".include_paths = &.{  }," in block   # headers=False -> no include dirs
+    assert ".lib = null" in block                # libs=False -> nothing to link
+
+
+def test_zigdeps_test_requires_are_generated():
+    """ test_requires must produce targets - a test build needs them just like host ones """
+    client = TestClient()
+    client.save({
+        "gtest/conanfile.py": GenConanfile("gtest", "1.0").with_package_info(
+            cpp_info={"libs": ["gtest"], "location": '"/fake/gtest/lib/libgtest.a"',
+                     "type": '"static-library"'}),
+        "conanfile.py": GenConanfile("app", "1.0").with_test_requires("gtest/1.0"),
+    })
+    client.run("create gtest")
+    client.run("install . -g ZigDeps")
+    content = client.load("conan_zig_deps/conan_deps.zig")
+
+    assert '.{ "gtest::gtest"' in _targets_section(content)
+
+
+def test_zigdeps_tool_requires_exposed_as_executables():
+    """ A tool_require has nothing to link, but its executable path is what a build.zig
+    actually wants - exposed through the separate conan_exes map """
+    client = TestClient()
+    client.save({
+        "gen/conanfile.py": GenConanfile("gen", "1.0").with_package_type("application")
+            .with_package_info(cpp_info={"exe": '"mygen"',
+                                         "location": '"/fake/gen/bin/mygen"'}),
+        "conanfile.py": GenConanfile("app", "1.0").with_tool_requires("gen/1.0"),
+    })
+    client.run("create gen")
+    client.run("install . -g ZigDeps")
+    content = client.load("conan_zig_deps/conan_deps.zig")
+
+    assert '.{ "gen::gen", "/fake/gen/bin/mygen" }' in _exes_section(content)
+    assert "gen::gen" not in _targets_section(content)
+
+    setup = client.load("conan_zig_deps/conan_setup.zig")
+    assert "pub fn exePath(" in setup
+
+
+def test_zigdeps_unappliable_flags_are_exposed_and_warned():
+    """ Zig has no way to push a dependency's compiler flags onto sources the consumer owns,
+    so they must be surfaced as data and warned about rather than silently dropped """
+    client = TestClient()
+    client.save({
+        "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_package_info(cpp_info={
+            "libs": ["pkg"], "location": '"/fake/pkg/lib/libpkg.a"',
+            "type": '"static-library"',
+            "cflags": ["-pthread"], "cxxflags": ["-fno-rtti"], "exelinkflags": ["-Wl,-z,now"],
+        }),
+        "conanfile.py": GenConanfile("app", "1.0").with_require("pkg/1.0"),
+    })
+    client.run("create pkg")
+    client.run("install . -g ZigDeps")
+    content = client.load("conan_zig_deps/conan_deps.zig")
+
+    assert '"-pthread"' in content
+    assert '"-fno-rtti"' in content
+    assert '"-Wl,-z,now"' in content
+    assert "cannot apply" in client.out or "pass explicitly" in client.out
+
+
+def test_zigdeps_frameworks_and_package_framework():
+    """ frameworkdirs must be emitted as search paths, and a package-shipped .framework
+    bundle linked by name with its parent directory as the search path """
+    client = TestClient()
+    client.save({
+        "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_package_info(cpp_info={
+            "frameworks": ["CoreFoundation"],
+            "frameworkdirs": ["/fake/pkg/Frameworks"],
+        }),
+        "fw/conanfile.py": GenConanfile("fw", "1.0").with_package_info(cpp_info={
+            "package_framework": '"/fake/fw/lib/MyFramework.framework"',
+            "type": '"shared-library"',
+        }),
+        "conanfile.py": GenConanfile("app", "1.0").with_require("pkg/1.0")
+            .with_require("fw/1.0"),
+    })
+    client.run("create pkg")
+    client.run("create fw")
+    client.run("install . -g ZigDeps")
+    content = client.load("conan_zig_deps/conan_deps.zig")
+
+    pkg_block = _target_block(content, "pkg::pkg")
+    assert '"CoreFoundation"' in pkg_block
+    assert '"/fake/pkg/Frameworks"' in pkg_block
+
+    fw_block = _target_block(content, "fw::fw")
+    assert '"MyFramework"' in fw_block          # linked by name, .framework stripped
+    assert '"/fake/fw/lib"' in fw_block         # parent dir as search path
+
+
+def test_zigdeps_duplicate_defines_preserved():
+    """ Duplicate define names are legal and must not silently collapse to the last one """
+    client = TestClient()
+    client.save({
+        "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_package_info(
+            cpp_info={"defines": ["DUP=1", "DUP=2", "OTHER"]}),
+        "conanfile.py": GenConanfile("app", "1.0").with_require("pkg/1.0"),
+    })
+    client.run("create pkg")
+    client.run("install . -g ZigDeps")
+    block = _target_block(client.load("conan_zig_deps/conan_deps.zig"), "pkg::pkg")
+
+    assert '.name = "DUP", .value = "1"' in block
+    assert '.name = "DUP", .value = "2"' in block
+
+
+def test_zigdeps_invalid_component_require_raises():
+    """ A cpp_info.requires naming a component that does not exist is a recipe bug, and must
+    be reported rather than silently remapped onto the package root """
+    client = TestClient()
+    client.save({
+        "dep/conanfile.py": GenConanfile("dep", "1.0").with_package_info(cpp_info={
+            "components": {"real": {"libs": ["real"],
+                                    "location": '"/fake/dep/lib/libreal.a"',
+                                    "type": '"static-library"'}}}),
+        "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_require("dep/1.0")
+            .with_package_info(cpp_info={"requires": ["dep::nonexistent"]}),
+        "conanfile.py": GenConanfile("app", "1.0").with_require("pkg/1.0"),
+    })
+    client.run("create dep")
+    client.run("create pkg")
+    client.run("install . -g ZigDeps", assert_error=True)
+    assert "component 'nonexistent' was not found in 'dep'" in client.out
+
+
+def test_zigdeps_default_components_skipping_missing():
+    """ default_components naming a component that was skipped (exe-only) must not leave a
+    dangling reference behind """
+    client = TestClient()
+    client.save({
+        "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_package_info(cpp_info={
+            "default_components": ["lib", "tool"],
+            "components": {
+                "lib": {"libs": ["lib"], "location": '"/fake/pkg/lib/liblib.a"',
+                       "type": '"static-library"'},
+                "tool": {"exe": '"mytool"', "location": '"/fake/pkg/bin/mytool"'},
+            }}),
+        "conanfile.py": GenConanfile("app", "1.0").with_require("pkg/1.0"),
+    })
+    client.run("create pkg")
+    client.run("install . -g ZigDeps")
+    root_block = _target_block(client.load("conan_zig_deps/conan_deps.zig"), "pkg::pkg")
+
+    assert '"pkg::lib"' in root_block
+    assert "pkg::tool" not in root_block  # skipped, so not referenced

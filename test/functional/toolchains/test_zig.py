@@ -20,7 +20,7 @@ _BUILD_ZIG = textwrap.dedent("""
         mod.link_libc = true;
 
         const exe = b.addExecutable(.{ .name = "app", .root_module = mod });
-        conan_setup.linkDependencies(exe);
+        conan_setup.linkDependencies(mod);
         b.installArtifact(exe);
 
         const run_cmd = b.addRunArtifact(exe);
@@ -79,7 +79,7 @@ def _build_zig_single_target(target_name):
             mod.link_libc = true;
 
             const exe = b.addExecutable(.{ .name = "app", .root_module = mod });
-            conan_setup.linkDependency(exe, "%s");
+            conan_setup.linkDependency(mod, "%s");
             b.installArtifact(exe);
 
             const run_cmd = b.addRunArtifact(exe);
@@ -894,7 +894,7 @@ def test_zigdeps_cyclic_requires_does_not_hang():
             mod.addCSourceFile(.{ .file = b.path("main.c"), .flags = &.{} });
             mod.link_libc = true;
             const exe = b.addExecutable(.{ .name = "app", .root_module = mod });
-            conan_setup.linkDependency(exe, "pkg::a");
+            conan_setup.linkDependency(mod, "pkg::a");
             b.installArtifact(exe);
         }
         """)
