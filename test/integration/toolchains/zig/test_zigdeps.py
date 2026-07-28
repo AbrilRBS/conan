@@ -34,8 +34,7 @@ def test_zigdeps_simple_package():
 
     assert content.count('.{ "pkg::pkg"') == 1
     assert '.kind = .STATIC' in content
-    assert '.path = "/fake/pkg/lib/libmylib.a"' in content
-    assert '.rpath_dir = null' in content
+    assert '.lib = "/fake/pkg/lib/libmylib.a"' in content
     assert '.name = "FOO", .value = "1"' in content
     assert '.name = "BAR", .value = "1"' in content
     assert '"pthread"' in content
@@ -46,9 +45,12 @@ def test_zigdeps_simple_package():
     # Every mutating call must go through .root_module - these moved off Step.Compile
     # directly in Zig 0.16 (see std/Build/Module.zig vs the older Step/Compile.zig API)
     for call in ("addIncludePath", "addObjectFile", "linkSystemLibrary", "linkFramework",
-                "addRPath", "addCMacro"):
+                "addCMacro"):
         assert f"step.{call}(" not in setup
         assert f"module.{call}(" in setup
+    # Runtime discovery is deliberately Conan's job (conanrun), not the generator's
+    assert "addRPath" not in setup
+    assert "addInstallFileWithDir" not in setup
 
 
 def test_zigdeps_components_own_data_not_merged():
@@ -165,12 +167,10 @@ def test_zigdeps_transitive_chain():
     assert '"libc::libc"' in libb_block
 
 
-def test_zigdeps_windows_shared_uses_import_lib_no_rpath():
-    """ A Windows shared lib must link against the import lib (.lib), not the .dll, and must
-    not get an rpath (rpath is a Unix ELF/Mach-O concept, meaningless for .dll loading) - but
-    the .dll's own location must still be exposed as ``runtime_path``, since Windows has no
-    rpath equivalent at all: without it, a consumer has no way to deploy the .dll next to
-    their executable and the resulting binary would fail to find it at runtime """
+def test_zigdeps_windows_shared_links_import_lib():
+    """ A Windows shared lib links against the import lib (.lib), not the runtime .dll.
+    Nothing is emitted to make the .dll findable at run time - that is left to Conan's
+    conanrun environment, so the .dll path must not appear anywhere """
     client = TestClient()
     client.save({
         "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_package_info(cpp_info={
@@ -186,15 +186,13 @@ def test_zigdeps_windows_shared_uses_import_lib_no_rpath():
     content = client.load("conan_zig_deps/conan_deps.zig")
 
     assert ".kind = .SHARED" in content
-    assert '.path = "C:/pkg/lib/mylib.lib"' in content
-    assert ".rpath_dir = null" in content
-    assert '.runtime_path = "C:/pkg/bin/mylib.dll"' in content
+    assert '.lib = "C:/pkg/lib/mylib.lib"' in content
+    assert "mylib.dll" not in content
 
 
-def test_zigdeps_unix_shared_gets_rpath():
-    """ A Unix shared lib (.so/.dylib) gets its directory registered as an rpath so the
-    resulting binary can find it at runtime (mirrors the fix already applied in BazelDeps
-    for https://github.com/conan-io/conan/issues/19190) """
+def test_zigdeps_unix_shared_links_library_no_rpath():
+    """ A Unix shared lib is linked directly, and deliberately gets no rpath - making it
+    loadable at run time is Conan's job via conanrun, not the generator's """
     client = TestClient()
     client.save({
         "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_package_info(cpp_info={
@@ -209,9 +207,8 @@ def test_zigdeps_unix_shared_gets_rpath():
     content = client.load("conan_zig_deps/conan_deps.zig")
 
     assert ".kind = .SHARED" in content
-    assert '.path = "/fake/pkg/lib/libmylib.so"' in content
-    assert '.rpath_dir = "/fake/pkg/lib"' in content
-    assert ".runtime_path = null" in content  # rpath already solves discovery on Unix
+    assert '.lib = "/fake/pkg/lib/libmylib.so"' in content
+    assert "rpath" not in content
 
 
 def test_zigdeps_header_only_no_lib_entry():
@@ -289,10 +286,10 @@ def test_zigdeps_dangling_component_reference_pruned():
     assert '"dep::lib"' in dep_block  # the auto-created root also excludes the exe component
 
 
-def test_zigdeps_versioned_shared_lib_no_spurious_runtime_path():
-    """ Regression test: a Unix shared lib with a distinct link_location (the common
-    libfoo.so.1.2.3 + libfoo.so link-name pattern) is already fully handled by rpath, and
-    must not also get a (Windows-only-meaningful) runtime_path """
+def test_zigdeps_versioned_shared_lib_links_link_location():
+    """ A Unix shared lib with a distinct link_location (the common libfoo.so.1.2.3 +
+    unversioned libfoo.so link-name pattern) links the unversioned name, since that is what
+    link_location is for - the versioned runtime file is not referenced """
     client = TestClient()
     client.save({
         "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_package_info(cpp_info={
@@ -307,9 +304,8 @@ def test_zigdeps_versioned_shared_lib_no_spurious_runtime_path():
     client.run("install . -g ZigDeps")
     content = client.load("conan_zig_deps/conan_deps.zig")
 
-    assert '.path = "/fake/pkg/lib/libmylib.so"' in content
-    assert '.rpath_dir = "/fake/pkg/lib"' in content
-    assert ".runtime_path = null" in content
+    assert '.lib = "/fake/pkg/lib/libmylib.so"' in content
+    assert "libmylib.so.1.2.3" not in content
 
 
 def test_zigdeps_control_characters_escaped():

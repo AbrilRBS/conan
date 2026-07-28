@@ -32,21 +32,22 @@ _BUILD_ZIG = textwrap.dedent("""
 
 
 def _app_conanfile(requires):
+    # ``settings`` matters here beyond package_id: VirtualRunEnv reads settings.os to decide
+    # whether to export (DY)LD_LIBRARY_PATH at all, so a consumer that declares no settings
+    # gets an empty conanrun environment and its shared dependencies stay unfindable.
     return textwrap.dedent("""
         from conan import ConanFile
 
         class App(ConanFile):
+            settings = "os", "compiler", "build_type", "arch"
             requires = "%s"
             generators = "ZigDeps"
 
             def build(self):
-                # Conan's preferred way to make a dependency's shared libraries findable at
-                # runtime is the auto-generated conanrun environment (PATH on Windows,
-                # (DY)LD_LIBRARY_PATH on Unix) - see e.g. test_cps.py or
-                # test_cmakeconfigdeps_new_cpp_linkage.py for the same idiom. ZigDeps' own
-                # rpath/DLL-copy handling (see conan_setup.zig) means this isn't strictly
-                # required here, but activating it is the idiomatic, defense-in-depth way to
-                # run a freshly built binary against Conan dependencies regardless of that.
+                # ZigDeps only wires dependencies up for the *build*; making shared libraries
+                # loadable at *run* time is Conan's job, through the auto-generated conanrun
+                # environment (PATH on Windows, (DY)LD_LIBRARY_PATH elsewhere). Same idiom as
+                # test_cps.py and test_cmakeconfigdeps_new_cpp_linkage.py.
                 self.run("zig build run", env="conanrun")
         """) % requires
 
@@ -223,11 +224,12 @@ def _shared_ext():
 
 
 def _shared_link_flags(libname):
-    """ Platform-specific flags a shared library needs at link time: an install name on
-    Darwin so the resulting rpath actually resolves it (see #19190/#19135), a soname on
-    Linux/ELF as the real-world equivalent, and an explicit import library on Windows (LLD's
-    MinGW-compatible COFF linker, unlike a plain ELF/Mach-O link, doesn't produce one unless
-    asked - matching the .a naming Conan's own auto-deduction regex expects) """
+    """ Platform-specific flags a shared library needs at link time: an ``@rpath`` install
+    name on Darwin (what Conan packages normally carry, and what ``DYLD_LIBRARY_PATH`` from
+    conanrun resolves by leaf name), a soname on Linux/ELF as the equivalent, and an explicit
+    import library on Windows (LLD's MinGW-compatible COFF linker, unlike a plain ELF/Mach-O
+    link, doesn't produce one unless asked - matching the .a naming Conan's own
+    auto-deduction regex expects) """
     system = platform.system()
     if system == "Darwin":
         return "-install_name @rpath/lib%s%s" % (libname, _shared_ext())
@@ -259,8 +261,8 @@ def _export_header(libname, function_name):
 @pytest.mark.slow
 @pytest.mark.tool("zig")
 def test_zigdeps_shared_chain():
-    """ A chain of two shared libraries (shareda -> sharedb): both get linked and both need
-    their own rpath entry for the resulting binary to find them at runtime """
+    """ A chain of two shared libraries (shareda -> sharedb): both get linked, and both are
+    found at runtime through conanrun rather than through anything the generator emits """
     c = TestClient()
     ext = _shared_ext()
     sharedb_conanfile = textwrap.dedent("""

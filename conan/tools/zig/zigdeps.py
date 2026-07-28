@@ -40,10 +40,9 @@ class ZigDeps:
     (unmerged) information, and depends on other targets through an explicit ``requires`` list,
     since Zig's build system does not propagate this information transitively on its own.
 
-    On Windows, since there is no rpath equivalent, linking a shared dependency also copies
-    its ``.dll`` next to whatever the consuming step installs (see ``conan_setup.zig``'s
-    ``linkTarget`` for why, and for alternatives if that copy isn't wanted - e.g. activating
-    Conan's own ``conanrun`` environment, or a deployer, instead).
+    This covers build time only. Making a shared dependency loadable at run time is left to
+    Conan's own ``conanrun`` environment (or a deployer) rather than handled here - see the
+    note in the generated ``conan_setup.zig``.
     """
 
     def __init__(self, conanfile):
@@ -136,22 +135,11 @@ class ZigDeps:
         if info.libs:
             assert info.location, f"{dep}: cpp_info.location missing for library {info.libs}"
             is_shared = info.type is PackageType.SHARED
+            # ``link_location`` is only set when it differs from ``location`` - on Windows, where
+            # a shared library links against its import lib rather than the runtime .dll
             link_path = info.link_location or info.location
-            needs_rpath = is_shared and not info.location.endswith(".dll")
-            # Windows has no rpath equivalent: a shared lib's runtime .dll is a different
-            # file than the .lib it links against, and must be deployed next to the
-            # consumer's executable to be found at all. Expose it so the generated glue can.
-            # Only for that case: rpath already solves discovery whenever it applies (e.g. a
-            # versioned libfoo.so.1.2.3 with a separate libfoo.so link_location for linking).
-            needs_runtime_path = is_shared and not needs_rpath and info.link_location and \
-                info.link_location != info.location
             result["type"] = "SHARED" if is_shared else "STATIC"
-            result["lib"] = {
-                "path": link_path.replace("\\", "/"),
-                "rpath_dir": os.path.dirname(info.location).replace("\\", "/")
-                if needs_rpath else None,
-                "runtime_path": info.location.replace("\\", "/") if needs_runtime_path else None,
-            }
+            result["lib"] = link_path.replace("\\", "/")
         return result
 
     @staticmethod
@@ -198,12 +186,6 @@ _CONAN_DEPS_TEMPLATE = """\
 
 const std = @import("std");
 
-pub const Lib = struct {
-    path: []const u8,
-    rpath_dir: ?[]const u8,
-    runtime_path: ?[]const u8,
-};
-
 pub const Define = struct {
     name: []const u8,
     value: []const u8,
@@ -217,7 +199,9 @@ pub const Target = struct {
     defines: []const Define,
     system_libs: []const []const u8,
     frameworks: []const []const u8,
-    lib: ?Lib,
+    /// Path of the library to link, if this target produces one. For a shared library on
+    /// Windows this is the import library, not the runtime .dll.
+    lib: ?[]const u8,
     requires: []const []const u8,
 };
 
@@ -240,19 +224,7 @@ pub const conan_targets = std.StaticStringMap(Target).initComptime(.{
         .system_libs = &.{ {% for l in t.system_libs %}"{{ l | zigstr }}", {% endfor %} },
         .frameworks = &.{ {% for f in t.frameworks %}"{{ f | zigstr }}", {% endfor %} },
 {% if t.lib %}
-        .lib = Lib{
-            .path = "{{ t.lib.path | zigstr }}",
-{% if t.lib.rpath_dir %}
-            .rpath_dir = "{{ t.lib.rpath_dir | zigstr }}",
-{% else %}
-            .rpath_dir = null,
-{% endif %}
-{% if t.lib.runtime_path %}
-            .runtime_path = "{{ t.lib.runtime_path | zigstr }}",
-{% else %}
-            .runtime_path = null,
-{% endif %}
-        },
+        .lib = "{{ t.lib | zigstr }}",
 {% else %}
         .lib = null,
 {% endif %}
@@ -283,46 +255,23 @@ fn linkTarget(step: *std.Build.Step.Compile, target: conan_deps.Target) void {
         module.linkFramework(framework, .{});
     }
     if (target.lib) |lib| {
-        module.addObjectFile(.{ .cwd_relative = lib.path });
-        if (lib.rpath_dir) |rpath_dir| {
-            module.addRPath(.{ .cwd_relative = rpath_dir });
-        }
-        if (lib.runtime_path) |runtime_path| {
-            // Windows has no rpath equivalent, so the .dll (as opposed to the .lib used
-            // above to link) has to be made reachable at run time some other way, or the
-            // resulting executable will fail to start with a "missing DLL" error.
-            //
-            // This copies it next to wherever the compile step gets installed (e.g.
-            // zig-out/bin), since that's the one thing guaranteed to work regardless of how
-            // the consumer later runs the result (a "run" step, a copied-out zig-out/,
-            // double-clicking the .exe, ...) - the executable's own directory is always
-            // searched first by Windows' DLL loader.
-            //
-            // If you'd rather not duplicate the .dll (e.g. to avoid it going stale if the
-            // Conan cache is updated), a few alternatives, in roughly increasing order of
-            // how much they take over from this automatic copy:
-            //   - Point your own run step at it directly instead, e.g.:
-            //       const run_cmd = b.addRunArtifact(exe);
-            //       run_cmd.addPathDir(std.fs.path.dirname(runtime_path).?);
-            //     using the path from conan_deps.conan_targets directly - but note this only
-            //     helps when running via that specific `Step.Run`, not for the built artifact
-            //     itself, which is why it isn't done here automatically.
-            //   - Activate the environment Conan itself generates for exactly this purpose
-            //     (conanrunenv, via the "VirtualRunEnv" generator, active by default) before
-            //     running your build: it sets PATH (Windows) / (DY)LD_LIBRARY_PATH (Unix) to
-            //     every dependency's bindirs/libdirs, so nothing needs to be copied at all.
-            //   - Use a Conan deployer (`conan install ... --deploy=runtime_deploy`) to
-            //     physically place every dependency's shared libraries and executables in one
-            //     folder as part of `install`, before `generate()` even runs - a copy, like
-            //     this one, but at the Conan layer instead of the Zig one.
-            const b = step.step.owner;
-            const basename = std.fs.path.basename(runtime_path);
-            const install_dll = b.addInstallFileWithDir(
-                .{ .cwd_relative = runtime_path }, .bin, basename);
-            b.getInstallStep().dependOn(&install_dll.step);
-        }
+        module.addObjectFile(.{ .cwd_relative = lib });
     }
 }
+
+// NOTE ON RUNTIME DISCOVERY
+// This only makes dependencies available at *build* time. Making a shared dependency
+// loadable at *run* time is deliberately left to Conan rather than handled here:
+// activate the "conanrun" environment Conan generates for exactly this purpose (it sets
+// PATH on Windows and (DY)LD_LIBRARY_PATH elsewhere, from every dependency's directories),
+// e.g. `self.run("zig build run", env="conanrun")` from a recipe, or by sourcing the
+// generated conanrun script directly. `conan install ... --deploy=runtime_deploy` is the
+// other option, placing the runtime artifacts in one folder at install time.
+//
+// Emitting rpaths, or copying .dlls next to the executable, was intentionally left out of
+// this first version: both duplicate what conanrun already does, and neither has a single
+// obviously-correct form across the platforms Conan supports. If real usage shows the
+// environment is not enough, this is the place to revisit.
 
 fn linkDependencyVisited(
     step: *std.Build.Step.Compile,
