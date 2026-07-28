@@ -335,15 +335,28 @@ declaration.
 
 ### Troubleshooting: headers that rely on transitive includes
 
-Some C++ libraries compile with Apple's or GNU's libc++ but not Zig's, because they lean on
-an include they never asked for. `fmt` is one: `fmt/format.h` calls `malloc` and `free`
-without including `<cstdlib>`, which fails under Zig's bundled libc++ with:
+Zig bundles its own libc++, whose headers include slightly less than Apple's or GNU's. A
+library that leans on an include it never asked for can therefore compile everywhere else
+and fail here. This is a property of the library version, not of `ZigDeps`, and is usually
+already fixed upstream — check for a newer version before working around it.
+
+`fmt` is a worked example. In `fmt/11.2.0`, `format.h` calls `malloc` and `free` without
+including `<cstdlib>`, so it fails under Zig with:
 
 ```
 error: use of undeclared identifier 'malloc'
 ```
 
-This is a property of the library, not of `ZigDeps`. Force the include from the consumer:
+`fmt` added the include after that release (`<cstdlib>` in 12.0.0, `<stdlib.h>` on master),
+so the fix is simply to move up — `fmt/12.0.0` compiles and runs with Zig unchanged:
+
+```ini
+[requires]
+fmt/12.0.0
+```
+
+If you are pinned to a version that still has the problem, force the include from the
+consumer rather than patching the package:
 
 ```zig
 mod.addCSourceFile(.{ .file = b.path("shim.cpp"),
