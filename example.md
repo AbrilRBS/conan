@@ -1,17 +1,18 @@
 # ZigDeps by example
 
-Four worked examples of consuming Conan packages from a Zig `build.zig`, using the
-experimental `ZigDeps` generator. Every one of these was built and run end to end against
-real ConanCenter packages — see [Verification](#verification) for versions and logs.
+Four worked examples of a **Zig project consuming Conan packages**, using the experimental
+`ZigDeps` generator. In each one the application is written in Zig; the C and C++ libraries
+come from ConanCenter. Every example here was built and run end to end — see
+[Verification](#verification).
 
 > `ZigDeps` is experimental. The shape of the generated Zig API is expected to change.
 
 **Contents**
 
-1. [A C library — OpenSSL](#1-a-c-library--openssl) — components, transitive dependencies, static and shared
-2. [A C++ library — pugixml + nlohmann_json](#2-a-c-library--pugixml--nlohmann_json) — compiled and header-only, C++ runtime
-3. [A build tool — flex](#3-a-build-tool--flex) — `tool_requires`, code generation
-4. [Tests — zlib + cmocka](#4-tests--zlib--cmocka) — `test_requires`, Zig-native and C test suites
+1. [Zig using a C library — OpenSSL](#1-zig-using-a-c-library--openssl) — components, transitive dependencies, static and shared
+2. [Zig using a C++ library — snappy](#2-zig-using-a-c-library--snappy) — the C++ runtime, via a library's own C API
+3. [Zig using a build tool — flex](#3-zig-using-a-build-tool--flex) — `tool_requires`, generated code
+4. [Testing a C library from Zig — zlib + cmocka](#4-testing-a-c-library-from-zig--zlib--cmocka) — `test_requires`
 
 ---
 
@@ -24,9 +25,9 @@ real ConanCenter packages — see [Verification](#verification) for versions and
 | `conan_deps.zig` | Data. A `comptime` map of every dependency: include dirs, library paths, defines, system libs, frameworks, and each target's own `requires` list. |
 | `conan_setup.zig` | Behaviour. Helpers your `build.zig` calls to push that data into a module. |
 
-Zig has no native format for describing a prebuilt C library, and does not propagate
-include or library paths through `linkLibrary()`, so there is nothing to emit *into* — the
-generator emits Zig source that your build imports instead.
+Zig has no native format for describing a prebuilt C library, and does not propagate include
+or library paths through `linkLibrary()`, so there is nothing to emit *into* — the generator
+emits Zig source that your build imports instead.
 
 Everything is keyed `"package::target"`, the same vocabulary CMake users know:
 `openssl::ssl` is a component, `openssl::openssl` is the package root.
@@ -41,13 +42,18 @@ conan.toolPath(b, "flex", "flex");            // a tool_requires executable
 
 The helpers take a `*std.Build.Module`, not a `*std.Build.Step.Compile`. In Zig 0.16 every
 call they make exists only on `Module`, and a module is not necessarily an artifact's root —
-so this also works for test modules and shared modules.
+so the same call works for a test module.
+
+Once a module has been set up this way, `@cImport` resolves the dependency's headers with no
+paths written by hand.
 
 ---
 
-## 1. A C library — OpenSSL
+## 1. Zig using a C library — OpenSSL
 
-Shows **component-level linking** and **transitive resolution**. OpenSSL's `crypto`
+A Zig program that hashes a string with OpenSSL. No C sources of our own.
+
+Shows **component-level linking** and **transitive resolution**: OpenSSL's `crypto`
 component depends on `zlib`, and `ssl` depends on `crypto`, so naming one target pulls the
 rest in automatically.
 
@@ -61,30 +67,35 @@ openssl/3.5.4
 ZigDeps
 ```
 
-**`main.c`**
+**`main.zig`**
 
-```c
-#include <stdio.h>
-#include <string.h>
-#include <openssl/evp.h>
-#include <openssl/crypto.h>
+```zig
+const std = @import("std");
 
-int main(void) {
-    const char *msg = "conan + zig";
-    unsigned char digest[EVP_MAX_MD_SIZE];
-    unsigned int len = 0;
+// Zig imports the C headers directly. ZigDeps put OpenSSL's include directories on this
+// module, so @cInclude resolves without any path being written here.
+const ssl = @cImport({
+    @cInclude("openssl/evp.h");
+    @cInclude("openssl/crypto.h");
+});
 
-    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
-    EVP_DigestInit_ex(ctx, EVP_sha256(), NULL);
-    EVP_DigestUpdate(ctx, msg, strlen(msg));
-    EVP_DigestFinal_ex(ctx, digest, &len);
-    EVP_MD_CTX_free(ctx);
+pub fn main() !void {
+    const msg = "conan + zig";
 
-    printf("%s\n", OpenSSL_version(OPENSSL_VERSION));
-    printf("sha256(\"%s\") = ", msg);
-    for (unsigned int i = 0; i < len; i++) printf("%02x", digest[i]);
-    printf("\n");
-    return 0;
+    var digest: [ssl.EVP_MAX_MD_SIZE]u8 = undefined;
+    var len: c_uint = 0;
+
+    const ctx = ssl.EVP_MD_CTX_new() orelse return error.OpenSslFailed;
+    defer ssl.EVP_MD_CTX_free(ctx);
+
+    if (ssl.EVP_DigestInit_ex(ctx, ssl.EVP_sha256(), null) != 1) return error.OpenSslFailed;
+    if (ssl.EVP_DigestUpdate(ctx, msg, msg.len) != 1) return error.OpenSslFailed;
+    if (ssl.EVP_DigestFinal_ex(ctx, &digest, &len) != 1) return error.OpenSslFailed;
+
+    std.debug.print("{s}\n", .{std.mem.span(ssl.OpenSSL_version(ssl.OPENSSL_VERSION))});
+    std.debug.print("sha256(\"{s}\") = ", .{msg});
+    for (digest[0..len]) |b| std.debug.print("{x:0>2}", .{b});
+    std.debug.print("\n", .{});
 }
 ```
 
@@ -98,9 +109,12 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const mod = b.createModule(.{ .target = target, .optimize = optimize });
-    mod.addCSourceFile(.{ .file = b.path("main.c"), .flags = &.{} });
-    mod.link_libc = true;
+    // A plain Zig module - no C or C++ sources of our own.
+    const mod = b.createModule(.{
+        .root_source_file = b.path("main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
 
     // Only the "crypto" component is needed. Its own requires - openssl::crypto ->
     // zlib::zlib - are followed automatically, so zlib is linked without naming it.
@@ -110,7 +124,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(exe);
 
     const run = b.addRunArtifact(exe);
-    b.step("run", "Run the example").dependOn(&run.step);
+    b.step("run", "Run the Zig program").dependOn(&run.step);
 }
 ```
 
@@ -124,7 +138,7 @@ OpenSSL 3.5.4 30 Sep 2025
 sha256("conan + zig") = c69d96afb1f7a8ea85d27a29245f1a31bb3e0026de72f0e4f762ad93fac142e6
 ```
 
-The generated graph, with no `build.zig` changes needed to walk it:
+The graph that gets walked, with nothing in `build.zig` describing it:
 
 ```
 openssl::ssl ──> openssl::crypto ──> zlib::zlib
@@ -139,8 +153,8 @@ zig build run
 ```
 
 `ZigDeps` covers **build time only**. It deliberately emits no rpaths and copies no
-libraries, because Conan already solves runtime discovery with `conanrun` (which sets
-`PATH` on Windows and `(DY)LD_LIBRARY_PATH` elsewhere). Skipping the activation gives:
+libraries, because Conan already solves runtime discovery with `conanrun` (which sets `PATH`
+on Windows and `(DY)LD_LIBRARY_PATH` elsewhere). Skipping the activation gives:
 
 ```
 dyld[49473]: Library not loaded: @rpath/libcrypto.3.dylib
@@ -153,46 +167,105 @@ which is the expected, documented behaviour — not a bug. From a recipe, the eq
 > by looking at `settings.os`. A consumer recipe that declares no `settings` gets a silently
 > **empty** `conanrun` environment, and shared dependencies stay unfindable with no warning.
 
+### Letting Zig compile your own C sources
+
+Zig ships a C compiler, so a project that still has C of its own needs no separate toolchain
+— and `ZigDeps` is used identically either way. Alongside `main.zig`, this example carries
+`digest.c` (the same hashing logic written in C) and builds it as a second target from the
+same `build.zig`:
+
+```zig
+// --- The same thing in C, compiled by Zig itself ---------------------------------
+// Zig ships a C compiler, so a project with its own C sources needs no separate
+// toolchain. ZigDeps is used identically either way.
+const c_mod = b.createModule(.{ .target = target, .optimize = optimize });
+c_mod.addCSourceFile(.{ .file = b.path("digest.c"), .flags = &.{"-std=c11"} });
+conan.linkDependency(c_mod, "openssl::crypto");
+
+const c_exe = b.addExecutable(.{ .name = "digest-c", .root_module = c_mod });
+b.installArtifact(c_exe);
+
+const run_c = b.addRunArtifact(c_exe);
+b.step("run-c", "Build the C version with Zig and run it").dependOn(&run_c.step);
+```
+
+```bash
+zig build run-c
+```
+
+```
+OpenSSL 3.5.4 30 Sep 2025 (from C)
+sha256("conan + zig") = c69d96afb1f7a8ea85d27a29245f1a31bb3e0026de72f0e4f762ad93fac142e6
+```
+
+Note the difference from the Zig module: a C module needs no `@cImport`, since `digest.c`
+includes the OpenSSL headers itself — `ZigDeps` supplies the include paths to both.
+
 ---
 
-## 2. A C++ library — pugixml + nlohmann_json
+## 2. Zig using a C++ library — snappy
 
-Shows the **C++ runtime** being linked automatically, and the difference between a
-**compiled** dependency and a **header-only** one. `pugixml` becomes a `.static` (or
-`.shared`) target; `nlohmann_json` becomes an `.interface` target with no library at all.
+**Zig can only `@cImport` C, never C++.** The clean case is a C++ library that ships a C API
+of its own: `snappy` is written in C++ but maintains `snappy-c.h` alongside it, so it is
+usable from Zig directly, with no shim and no C++ in the project at all.
+
+This is also the sharpest demonstration of what `ZigDeps` contributes. Nothing on the Zig
+side looks like C++ — a C header, a C API — yet the *implementation* behind that API is C++,
+so the C++ standard library is still required at link time. A Zig binary does not link it by
+default. Building without it fails with **9 undefined `std::` symbols**:
+
+```
+error: undefined symbol: __ZNSt3__112basic_stringIcNS_11char_traitsIcEENS_9allocatorIcEEE5eraseEmm
+```
+
+`ZigDeps` detects that snappy is a C++ package and asks for the runtime, so this never
+surfaces.
+
+Note also the two targets snappy produces: `snappy::snappy` is an `.interface` target — a
+package root with nothing to link — which requires `snappy::snappylib`, the `.static` (or
+`.shared`) library that carries the actual archive.
 
 **`conanfile.txt`**
 
 ```ini
 [requires]
-pugixml/1.14
-nlohmann_json/3.11.3
+snappy/1.1.10
 
 [generators]
 ZigDeps
 ```
 
-**`main.cpp`**
+**`main.zig`**
 
-```cpp
-#include <pugixml.hpp>
-#include <nlohmann/json.hpp>
-#include <iostream>
+```zig
+const std = @import("std");
 
-int main() {
-    const char *xml = R"(<deps><dep name="pugixml" kind="compiled"/>)"
-                      R"(<dep name="nlohmann_json" kind="header-only"/></deps>)";
+// snappy is written in C++, but ships snappy-c.h - a real C API maintained by the project
+// itself. That is what makes it usable from Zig directly: Zig can @cImport C headers, but
+// never C++ ones, so a C++ library is only reachable when it exposes a C surface like this.
+//
+// Nothing below is C++, yet the C++ standard library is still required at link time,
+// because the *implementation* behind this C API is C++. ZigDeps detects that and asks for
+// the runtime; without it the link fails with undefined std:: symbols.
+const snappy = @cImport({
+    @cInclude("snappy-c.h");
+});
 
-    pugi::xml_document doc;
-    if (!doc.load_string(xml)) { std::cerr << "parse failed\n"; return 1; }
+pub fn main() !void {
+    const input = "conan conan conan zig zig zig zig";
 
-    nlohmann::json out = nlohmann::json::array();
-    for (auto dep : doc.child("deps").children("dep")) {
-        out.push_back({{"name", dep.attribute("name").as_string()},
-                       {"kind", dep.attribute("kind").as_string()}});
-    }
-    std::cout << out.dump(2) << std::endl;
-    return 0;
+    var compressed: [256]u8 = undefined;
+    var compressed_len: usize = compressed.len;
+    if (snappy.snappy_compress(input, input.len, &compressed, &compressed_len) != snappy.SNAPPY_OK)
+        return error.CompressFailed;
+
+    var restored: [256]u8 = undefined;
+    var restored_len: usize = restored.len;
+    if (snappy.snappy_uncompress(&compressed, compressed_len, &restored, &restored_len) != snappy.SNAPPY_OK)
+        return error.UncompressFailed;
+
+    std.debug.print("compressed {d} -> {d} bytes\n", .{ input.len, compressed_len });
+    std.debug.print("round trip ok: {}\n", .{std.mem.eql(u8, input, restored[0..restored_len])});
 }
 ```
 
@@ -206,14 +279,18 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const mod = b.createModule(.{ .target = target, .optimize = optimize });
-    mod.addCSourceFile(.{ .file = b.path("main.cpp"), .flags = &.{"-std=c++17"} });
+    // A plain Zig module. No C++ sources, and no shim: snappy provides the C API itself.
+    const mod = b.createModule(.{
+        .root_source_file = b.path("main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
 
-    // Neither link_libc nor link_libcpp is set here: ZigDeps knows both packages are C++
-    // and requests the runtime itself.
+    // link_libcpp is never set here. ZigDeps knows snappy is a C++ package and asks for the
+    // C++ runtime itself - a Zig binary would otherwise not link it at all.
     conan.linkDependencies(mod);
 
-    const exe = b.addExecutable(.{ .name = "xml2json", .root_module = mod });
+    const exe = b.addExecutable(.{ .name = "roundtrip", .root_module = mod });
     b.installArtifact(exe);
 
     const run = b.addRunArtifact(exe);
@@ -226,27 +303,35 @@ conan install . -of . --build=missing
 zig build run
 ```
 
-```json
-[
-  { "kind": "compiled",    "name": "pugixml" },
-  { "kind": "header-only", "name": "nlohmann_json" }
-]
+```
+compressed 33 -> 27 bytes
+round trip ok: true
 ```
 
-Add `-o "pugixml/*:shared=True"` for the shared build (and `source ./conanrun.sh` to run it);
-`nlohmann_json` is unaffected, since a header-only package has nothing to make shared.
+Add `-o "snappy/*:shared=True"` for the shared build, and `source ./conanrun.sh` to run it.
+
+### When the library has no C API
+
+Most C++ libraries do not ship one. `pugixml` and `nlohmann_json`, for example, are
+C++-only, so a Zig consumer has to add a small `extern "C"` shim — one `.cpp` file exposing
+the operations it needs — and `@cImport` that shim's header instead. The `build.zig` is
+otherwise unchanged: `linkDependencies()` still supplies the include paths and the C++
+runtime for the shim to compile and link against.
+
+Prefer a library with an official C API where one exists; a hand-written shim is code you
+then own and have to keep in step with the library.
 
 ### How C++ is detected
 
 A dependency's `languages` attribute is authoritative when the recipe sets it — a package
-declaring `languages = "C"` never gets the C++ runtime. Most recipes still leave it unset,
-so `ZigDeps` falls back to `compiler.libcxx`: Conan only keeps that setting for C++
-packages, since a C recipe drops it with `settings.rm_safe("compiler.libcxx")`.
+declaring `languages = "C"` never gets the C++ runtime. Most recipes still leave it unset, so
+`ZigDeps` falls back to `compiler.libcxx`: Conan only keeps that setting for C++ packages,
+since a C recipe drops it with `settings.rm_safe("compiler.libcxx")`.
 
-That fallback is not exhaustive. A **header-only C++ package that clears its settings**
-looks identical to a C one, so set `mod.link_libcpp = true` yourself for those. CMake
-consumers have the same gap, and resolve it the same way — through the consumer's own
-`project(... CXX)` declaration.
+That fallback is not exhaustive. A **header-only C++ package that clears its settings** looks
+identical to a C one, so set `mod.link_libcpp = true` yourself for those. CMake consumers
+have the same gap, and resolve it the same way — through the consumer's own `project(... CXX)`
+declaration.
 
 ### Troubleshooting: headers that rely on transitive includes
 
@@ -261,17 +346,17 @@ error: use of undeclared identifier 'malloc'
 This is a property of the library, not of `ZigDeps`. Force the include from the consumer:
 
 ```zig
-mod.addCSourceFile(.{ .file = b.path("main.cpp"),
+mod.addCSourceFile(.{ .file = b.path("shim.cpp"),
                       .flags = &.{ "-std=c++17", "-include", "cstdlib" } });
 ```
 
 ---
 
-## 3. A build tool — flex
+## 3. Zig using a build tool — flex
 
 Shows `tool_requires`: a dependency in the **build context**, where there is nothing to link
-and the only thing you want is the path to a program. Here `flex` generates a C lexer at
-build time, which Zig then compiles.
+and the only thing you want is the path to a program. `flex` generates a C lexer during the
+build; the Zig program drives it. The generated `.c` never exists in the repository.
 
 **`conanfile.txt`**
 
@@ -283,12 +368,11 @@ flex/2.6.4
 ZigDeps
 ```
 
-**`counter.l`**
+**`counter.l`** — note there is no `main()`; the lexer is a library Zig calls
 
 ```lex
 %option noyywrap nounput noinput
 %{
-#include <stdio.h>
 int words = 0, numbers = 0;
 %}
 %%
@@ -296,10 +380,25 @@ int words = 0, numbers = 0;
 [a-zA-Z]+   { words++; }
 .|\n        { /* skip */ }
 %%
-int main(void) {
-    yylex();
-    printf("words=%d numbers=%d\n", words, numbers);
-    return 0;
+int count_words(void)   { return words; }
+int count_numbers(void) { return numbers; }
+```
+
+**`main.zig`**
+
+```zig
+const std = @import("std");
+
+// The lexer C source does not exist in the repository: flex generates it during the build,
+// and Zig compiles it into this binary. Only the hand-written header is imported.
+const lexer = @cImport({
+    @cInclude("lexer.h");
+});
+
+pub fn main() !void {
+    _ = lexer.yylex(); // reads stdin
+    std.debug.print("words={d} numbers={d}\n",
+        .{ lexer.count_words(), lexer.count_numbers() });
 }
 ```
 
@@ -319,8 +418,13 @@ pub fn build(b: *std.Build) void {
     const lexer_c = flex.addOutputFileArg("counter.c");
     flex.addFileArg(b.path("counter.l"));
 
-    const mod = b.createModule(.{ .target = target, .optimize = optimize });
+    const mod = b.createModule(.{
+        .root_source_file = b.path("main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
     mod.addCSourceFile(.{ .file = lexer_c, .flags = &.{} });
+    mod.addIncludePath(b.path("."));
     mod.link_libc = true;
 
     const exe = b.addExecutable(.{ .name = "counter", .root_module = mod });
@@ -351,10 +455,10 @@ source ./conanbuild.sh    # flex's bindir is now first on PATH
 zig build run             # with b.addSystemCommand(&.{"flex", ...})
 ```
 
-Both are valid. The difference is what happens when the environment is *not* active, which
-is the common case when someone just runs `zig build` in a shell. On a machine with a system
-`flex` — macOS ships `/usr/bin/flex` — a bare `"flex"` silently resolves to that one
-instead, with no error and a near-identical version string.
+Both are valid. The difference is what happens when the environment is *not* active, which is
+the common case when someone just runs `zig build` in a shell. On a machine with a system
+`flex` — macOS ships `/usr/bin/flex` — a bare `"flex"` silently resolves to that one instead,
+with no error and a near-identical version string.
 
 `toolPath()` resolves inside the package's own bindir, so the build does not depend on
 whether the environment happens to be active. Use `"flex"` plus `conanbuild` if you prefer
@@ -365,14 +469,16 @@ exposes `m4`, which `flex` requires.
 
 ---
 
-## 4. Tests — zlib + cmocka
+## 4. Testing a C library from Zig — zlib + cmocka
 
-**Yes — you can test C/C++ Conan libraries from Zig**, in two different ways, and this
-example does both in one `zig build test`.
+Zig's own test runner links a Conan dependency like any other module, so **tests for a C
+library can be written in Zig**. `b.addTest` takes a module, and `linkDependencies()` accepts
+it directly.
 
-`cmocka` is declared under `[test_requires]`. It becomes a real target in `conan_deps.zig`,
-but is deliberately **excluded from `direct_targets`**, so `linkDependencies()` never drags
-a test framework into the application. You name it explicitly, only in the test binary.
+A C test framework is shown second, for the case where the tests themselves are C. `cmocka`
+is declared under `[test_requires]`: it becomes a real target in `conan_deps.zig`, but is
+deliberately **excluded from `direct_targets`**, so `linkDependencies()` never drags a test
+framework into the application. You name it explicitly, only in the test binary.
 
 **`conanfile.txt`**
 
@@ -387,9 +493,7 @@ cmocka/1.1.7
 ZigDeps
 ```
 
-### Zig-native tests over a C library
-
-**`test_zlib.zig`**
+**`test_zlib.zig`** — the primary suite
 
 ```zig
 const std = @import("std");
@@ -417,9 +521,7 @@ test "zlib version is the one Conan resolved" {
 `@cImport` works because `linkDependencies()` puts zlib's include directories on the test
 module before the import is translated.
 
-### A C test suite driven by cmocka
-
-**`test_zlib_cmocka.c`**
+**`test_zlib_cmocka.c`** — the secondary, C-based suite
 
 ```c
 #include <stdarg.h>
@@ -498,6 +600,7 @@ to show the 3 Zig tests alongside cmocka's output.
 
 | Limitation | Why |
 | --- | --- |
+| Zig cannot `@cImport` C++ headers | A Zig-only property. C++ dependencies need a C surface: the library's own, or a shim — see example 2. |
 | A dependency's `cflags` / `cxxflags` / link flags are **not applied** | Zig has no module-level flag injection — `Module.addCSourceFile` only applies flags to files added through it. They are emitted in `conan_deps.zig` and Conan warns when a dependency declares any, so pass them yourself. |
 | No runtime discovery (no rpaths, no copied DLLs) | Deliberate: `conanrun` and deployers already solve this. See example 1. |
 | No `set_property` / target-name customisation | Target names are fixed as `pkg::component`. |
@@ -508,25 +611,20 @@ to show the 3 Zig tests alongside cmocka's output.
 
 ## Verification
 
-Every example above was built and run before publishing. Nothing here is illustrative-only.
+Every example above was built and run before publishing. Nothing here is illustrative-only,
+and the code shown is the code that was compiled.
 
 | | Toolchain |
 | --- | --- |
 | Platform | macOS 26, arm64 (Apple Silicon) |
 | Zig | 0.16.0 |
 | Conan | `ar/zigdeps-2` branch |
-| Packages | `openssl/3.5.4`, `zlib/1.3.1`, `pugixml/1.14`, `nlohmann_json/3.11.3`, `flex/2.6.4` (+ `m4/1.4.19`), `cmocka/1.1.7` |
+| Packages | `openssl/3.5.4`, `zlib/1.3.1`, `snappy/1.1.10`, `flex/2.6.4` (+ `m4/1.4.19`), `cmocka/1.1.7` |
 
-Full `conan install` and `zig build` logs for each example — in both static and shared
-configurations — plus the exact generated `conan_deps.zig` / `conan_setup.zig` for each, are
-kept under `.zigdeps-example-logs/`.
-
-| Example | Static | Shared |
-| --- | --- | --- |
-| 1. OpenSSL | `01-c-openssl-static-*.log` | `01-c-openssl-shared-*.log` |
-| 2. pugixml + nlohmann_json | `02-cpp-static-*.log` | `02-cpp-shared-*.log` |
-| 3. flex | `03-tool-flex-*.log` | n/a — a build tool has no link variant |
-| 4. zlib + cmocka | `04-tests-static-*.log` | `04-tests-shared-*.log` |
+Examples 1, 2 and 4 were each built and run in both **static** and **shared** configurations.
+Example 3 has no link variant, being a build tool. Full `conan install` and `zig build` logs
+for every run, the exact generated `conan_deps.zig` / `conan_setup.zig` for each example, and
+the sources as built are retained internally for traceability.
 
 Because ConanCenter has no prebuilt binaries for `apple-clang 21`, these runs used a
 `compatibility.py` plugin mapping it onto older ABI-compatible binaries. Without it, add
