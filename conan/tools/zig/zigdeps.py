@@ -268,10 +268,18 @@ fn linkTarget(step: *std.Build.Step.Compile, target: conan_deps.Target) void {
 // generated conanrun script directly. `conan install ... --deploy=runtime_deploy` is the
 // other option, placing the runtime artifacts in one folder at install time.
 //
-// Emitting rpaths, or copying .dlls next to the executable, was intentionally left out of
-// this first version: both duplicate what conanrun already does, and neither has a single
-// obviously-correct form across the platforms Conan supports. If real usage shows the
-// environment is not enough, this is the place to revisit.
+// Watch out: VirtualRunEnv decides whether to export the library-path variables at all by
+// looking at settings.os, so a consumer recipe that declares no `settings` gets a silently
+// empty conanrun environment and the libraries stay unfindable.
+//
+// This differs from a CMake-based consumer, where CMake adds an rpath to build-tree
+// binaries by itself, so they run without conanrun (it strips that rpath again on install,
+// so installed binaries need the environment either way). Zig has no equivalent behaviour.
+// Reproducing it here - emitting rpaths, or copying .dlls next to the executable - was
+// intentionally left out of this first version: it duplicates what conanrun already does,
+// and neither mechanism has a single obviously-correct form across the platforms Conan
+// supports. If real usage shows the environment is not enough, this is the place to
+// revisit.
 
 fn linkDependencyVisited(
     step: *std.Build.Step.Compile,
