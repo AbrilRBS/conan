@@ -53,6 +53,9 @@ class ZigDeps:
         """
         This method will save the generated files to the ``conanfile.generators_folder`` folder
         """
+        self._conanfile.output.warning("ZigDeps is experimental, and might get "
+                                       "breaking changes in future releases",
+                                       warn_tag="experimental")
         check_duplicated_generator(self, self._conanfile)
         generator_files = self._content()
         for generator_file, content in generator_files.items():

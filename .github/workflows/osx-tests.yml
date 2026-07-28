@@ -119,8 +119,10 @@ jobs:
           version=0.16.0
           wget -q -O zig-${version}.tar.xz https://ziglang.org/download/${version}/zig-aarch64-macos-${version}.tar.xz
           tar -xJf zig-${version}.tar.xz
+          mkdir -p ${HOME}/Applications/zig
           mv zig-aarch64-macos-${version} ${HOME}/Applications/zig/${version}
           rm zig-${version}.tar.xz
+          ${HOME}/Applications/zig/${version}/zig version
 
   osx_tests:
     needs: osx_setup

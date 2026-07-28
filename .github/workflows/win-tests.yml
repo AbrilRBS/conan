@@ -233,9 +233,13 @@ jobs:
           $tmpDir = "C:\tools\zig_tmp"
           Invoke-WebRequest -Uri $url -OutFile $zipFile
           Expand-Archive -Path $zipFile -DestinationPath $tmpDir -Force
+          if (-not (Test-Path "C:\tools\zig")) {
+              New-Item -Path "C:\tools\zig" -ItemType Directory | Out-Null
+          }
           Move-Item -Path "$tmpDir\zig-x86_64-windows-$version" -Destination "C:\tools\zig\$version"
           Remove-Item $zipFile
           Remove-Item -Recurse -Force $tmpDir
+          & "C:\tools\zig\$version\zig.exe" version
 
       - name: Prepare environment for functional tests
         run: |
