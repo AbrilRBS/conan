@@ -180,7 +180,7 @@ jobs:
             C:\tools\bazel\8.4.2
             C:\tools\bazel\9.1.0
             C:\tools\zig\0.16.0
-          key: ${{ runner.os }}-conan-tools-cache
+          key: ${{ runner.os }}-conan-tools-cache-zig0160
 
       - name: Install CMake versions
         if: steps.cache-tools.outputs.cache-hit != 'true'

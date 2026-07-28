@@ -94,7 +94,6 @@ class ZigDeps:
         has_components = full_cpp_info.has_components
         components = full_cpp_info.components if has_components else {pkg_name: full_cpp_info}
 
-        lib_target_names = []
         all_target_names = []
         for comp_name, info in components.items():
             if info.exe or not (info.frameworks or info.includedirs or info.libs
@@ -103,24 +102,23 @@ class ZigDeps:
             target_key = f"{pkg_name}::{comp_name}"
             targets[target_key] = self._target_data(dep, info, has_components)
             all_target_names.append(target_key)
-            if info.libs:
-                lib_target_names.append(target_key)
 
         root_key = f"{pkg_name}::{pkg_name}"
         if root_key not in targets and all_target_names:
             if full_cpp_info.default_components is not None:
                 requires = [f"{pkg_name}::{c}" for c in full_cpp_info.default_components]
             else:
-                # Prefer the linkable ones, matching CMakeConfigDeps; only fall back to
-                # every contributing component when none of them actually produce a lib
-                # (e.g. a components-based package that's entirely header-only)
-                requires = lib_target_names or all_target_names
+                # Every contributing component, not only the ones producing a library:
+                # a header-only component still carries includedirs, defines and its own
+                # requires, and would otherwise be unreachable from the package root.
+                # This is what CMakeConfigDeps' _add_root_lib_target does too.
+                requires = all_target_names
             targets[root_key] = self._interface_target(requires)
 
     @staticmethod
     def _interface_target(requires):
         return {"type": "INTERFACE", "include_paths": [], "defines": {}, "system_libs": [],
-                "frameworks": [], "lib": None, "requires": requires}
+                "frameworks": [], "lib": None, "link_cpp": False, "requires": requires}
 
     def _target_data(self, dep, info, has_components):
         result = {
@@ -130,6 +128,7 @@ class ZigDeps:
             "system_libs": list(info.system_libs),
             "frameworks": list(info.frameworks),
             "lib": None,
+            "link_cpp": False,
             "requires": self._requires(dep, info, has_components),
         }
         if info.libs:
@@ -140,6 +139,11 @@ class ZigDeps:
             link_path = info.link_location or info.location
             result["type"] = "SHARED" if is_shared else "STATIC"
             result["lib"] = link_path.replace("\\", "/")
+            # A C++ dependency needs the C++ runtime linked into the consumer, or it fails
+            # with undefined std:: symbols. Same source CMakeConfigDeps uses for its
+            # link_languages, and the same component-then-package fallback.
+            languages = info.languages or dep.languages or []
+            result["link_cpp"] = "C++" in languages
         return result
 
     @staticmethod
@@ -174,10 +178,14 @@ class ZigDeps:
                 continue  # The transitive dep might have been skipped
             if req_dep.package_type is PackageType.APP:
                 continue  # It doesn't make sense to link a package that is an App
+            # Key off the *resolved* dependency, not the name the recipe wrote: under
+            # ``replace_requires`` those differ, and targets are always created from the
+            # resolved name, so using req_pkg here would dangle (and then be pruned away)
+            req_name = req_dep.ref.name
             if req_dep.cpp_info.components.get(req_comp) is not None:
-                result.append(f"{req_pkg}::{req_comp}")
+                result.append(f"{req_name}::{req_comp}")
             else:  # It must be the interface pkgname::pkgname target
-                result.append(f"{req_pkg}::{req_pkg}")
+                result.append(f"{req_name}::{req_name}")
         return result
 
 
@@ -202,6 +210,8 @@ pub const Target = struct {
     /// Path of the library to link, if this target produces one. For a shared library on
     /// Windows this is the import library, not the runtime .dll.
     lib: ?[]const u8,
+    /// Whether this target is C++, and therefore needs the C++ runtime linked in.
+    link_cpp: bool,
     requires: []const []const u8,
 };
 
@@ -228,6 +238,7 @@ pub const conan_targets = std.StaticStringMap(Target).initComptime(.{
 {% else %}
         .lib = null,
 {% endif %}
+        .link_cpp = {{ "true" if t.link_cpp else "false" }},
         .requires = &.{ {% for r in t.requires %}"{{ r | zigstr }}", {% endfor %} },
     } },
 {% endfor %}
@@ -249,13 +260,18 @@ fn linkTarget(step: *std.Build.Step.Compile, target: conan_deps.Target) void {
         module.addCMacro(define.name, define.value);
     }
     for (target.system_libs) |lib| {
-        module.linkSystemLibrary(lib, .{});
+        // Conan already resolved exactly what to link, so don't let Zig second-guess it
+        // through pkg-config (which it would do by default, use_pkg_config = .yes).
+        module.linkSystemLibrary(lib, .{ .use_pkg_config = .no });
     }
     for (target.frameworks) |framework| {
         module.linkFramework(framework, .{});
     }
     if (target.lib) |lib| {
         module.addObjectFile(.{ .cwd_relative = lib });
+    }
+    if (target.link_cpp) {
+        module.link_libcpp = true;
     }
 }
 

@@ -906,3 +906,58 @@ def test_zigdeps_cyclic_requires_does_not_hang():
             "main.c": main_c})
     c.run("create pkg")
     c.run("build .")
+
+
+@pytest.mark.slow
+@pytest.mark.tool("zig")
+def test_zigdeps_cpp_dependency():
+    """ A C++ dependency must get the C++ runtime linked into the consumer. Without it the
+    link fails with undefined std:: symbols - which every other functional test here misses,
+    because they are all C-only """
+    c = TestClient()
+    cpplib_conanfile = textwrap.dedent("""
+        import os
+        from conan import ConanFile
+        from conan.tools.files import copy
+
+        class CppLib(ConanFile):
+            name = "cpplib"
+            version = "1.0"
+            package_type = "static-library"
+            languages = "C++"
+            exports_sources = "cpplib.cpp", "cpplib.h"
+
+            def build(self):
+                self.run("zig c++ -c cpplib.cpp -o cpplib.o")
+                self.run("zig ar rcs libcpplib.a cpplib.o")
+
+            def package(self):
+                copy(self, "*.a", self.build_folder, os.path.join(self.package_folder, "lib"))
+                copy(self, "*.h", self.build_folder, os.path.join(self.package_folder, "include"))
+
+            def package_info(self):
+                self.cpp_info.libs = ["cpplib"]
+        """)
+    # Uses std::string internally, so the C++ runtime is genuinely required at link time
+    cpplib_h = 'extern "C" int cpp_value(void);\n'
+    cpplib_cpp = textwrap.dedent("""
+        #include "cpplib.h"
+        #include <string>
+        extern "C" int cpp_value(void) {
+            std::string s = "1234";
+            return static_cast<int>(s.size()) + 38;
+        }
+        """)
+
+    c.save({"cpplib/conanfile.py": cpplib_conanfile,
+            "cpplib/cpplib.h": cpplib_h,
+            "cpplib/cpplib.cpp": cpplib_cpp,
+            "conanfile.py": _app_conanfile("cpplib/1.0"),
+            "build.zig": _BUILD_ZIG,
+            "main.c": _main_c("cpp_value")})
+    c.run("create cpplib")
+    c.run("build .")
+    assert "cpp_value=42" in c.out
+
+    deps = c.load("conan_zig_deps/conan_deps.zig")
+    assert ".link_cpp = true" in deps

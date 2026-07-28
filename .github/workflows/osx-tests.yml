@@ -61,7 +61,7 @@ jobs:
             ~/Applications/bazel/8.4.2
             ~/Applications/bazel/9.1.0
             ~/Applications/zig/0.16.0
-          key: ${{ runner.os }}-macos26-conan-tools-cache
+          key: ${{ runner.os }}-macos26-conan-tools-cache-zig0160
 
       - name: Build CMake old versions not available for ARM
         if: steps.cache-tools.outputs.cache-hit != 'true'
@@ -158,7 +158,7 @@ jobs:
             ~/Applications/bazel/8.4.2
             ~/Applications/bazel/9.1.0
             ~/Applications/zig/0.16.0
-          key: ${{ runner.os }}-macos26-conan-tools-cache
+          key: ${{ runner.os }}-macos26-conan-tools-cache-zig0160
 
       - name: Select Xcode 26.4.1
         run: |
