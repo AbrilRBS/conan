@@ -609,11 +609,49 @@ to show the 3 Zig tests alongside cmocka's output.
 
 ---
 
+## Windows: match the dependency's ABI
+
+Conan's Windows binaries are normally built with **MSVC**, but Zig defaults to the **MinGW
+(`gnu`) ABI** on Windows — and only ships libc for that ABI. Linking an MSVC-produced object
+in gnu mode fails on the `/DEFAULTLIB:` directives it carries, which lld then looks for under
+MinGW names:
+
+```
+error: lld-link: could not open 'libMSVCRT.a': No such file or directory
+error: lld-link: could not open 'libOLDNAMES.a': No such file or directory
+```
+
+That is an ABI mismatch, not a missing dependency. Ask for the ABI the packages were built
+with:
+
+```zig
+const std = @import("std");
+const builtin = @import("builtin");
+
+pub fn build(b: *std.Build) void {
+    // Match the ABI of the Conan binaries: MSVC on Windows, native elsewhere.
+    var query: std.Target.Query = .{};
+    if (builtin.os.tag == .windows) query.abi = .msvc;
+    const target = b.standardTargetOptions(.{ .default_target = query });
+    // …
+}
+```
+
+Targeting the `msvc` ABI needs a real MSVC installation, since Zig does not bundle a libc for
+it — `zig cc -target x86_64-windows-msvc` reports *"unable to provide libc"* without one.
+
+The rule is simply that both sides must agree. If instead you build the dependencies
+themselves with `zig cc` (a Conan profile using Zig as the compiler), they are `gnu` on both
+sides and no override is needed.
+
+---
+
 ## Known limitations
 
 | Limitation | Why |
 | --- | --- |
 | Zig cannot `@cImport` C++ headers | A Zig-only property. C++ dependencies need a C surface: the library's own, or a shim — see example 2. |
+| On Windows the consumer must target the `msvc` ABI | Conan's Windows binaries are MSVC; Zig defaults to MinGW. See above. |
 | A dependency's `cflags` / `cxxflags` / link flags are **not applied** | Zig has no module-level flag injection — `Module.addCSourceFile` only applies flags to files added through it. They are emitted in `conan_deps.zig` and Conan warns when a dependency declares any, so pass them yourself. |
 | No runtime discovery (no rpaths, no copied DLLs) | Deliberate: `conanrun` and deployers already solve this. See example 1. |
 | No `set_property` / target-name customisation | Target names are fixed as `pkg::component`. |

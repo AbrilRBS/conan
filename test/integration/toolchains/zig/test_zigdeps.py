@@ -601,9 +601,13 @@ def test_zigdeps_frameworks_and_package_framework():
     bundle linked by name with its parent directory as the search path """
     client = TestClient()
     client.save({
+        # frameworkdirs is rebased onto the package folder when relative, and a
+        # leading-slash path is not absolute on Windows (ntpath.isabs), so an absolute-
+        # looking POSIX path would come out drive-prefixed there. Relative, like the
+        # includedirs above, behaves the same everywhere.
         "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_package_info(cpp_info={
             "frameworks": ["CoreFoundation"],
-            "frameworkdirs": ["/fake/pkg/Frameworks"],
+            "frameworkdirs": ["myframeworks"],
         }),
         "fw/conanfile.py": GenConanfile("fw", "1.0").with_package_info(cpp_info={
             "package_framework": '"/fake/fw/lib/MyFramework.framework"',
@@ -619,7 +623,7 @@ def test_zigdeps_frameworks_and_package_framework():
 
     pkg_block = _target_block(content, "pkg::pkg")
     assert '"CoreFoundation"' in pkg_block
-    assert '"/fake/pkg/Frameworks"' in pkg_block
+    assert "myframeworks" in pkg_block
 
     fw_block = _target_block(content, "fw::fw")
     assert '"MyFramework"' in fw_block          # linked by name, .framework stripped

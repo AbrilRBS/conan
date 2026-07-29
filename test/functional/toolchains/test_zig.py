@@ -90,6 +90,23 @@ def _build_zig_single_target(target_name):
         """) % target_name
 
 
+# Conan's Windows binaries are built with MSVC, but Zig defaults to the MinGW (gnu) ABI on
+# Windows - and only ships libc for that ABI. Linking an MSVC-produced object in gnu mode
+# fails on the /DEFAULTLIB:MSVCRT and /DEFAULTLIB:OLDNAMES directives it carries, which lld
+# then looks for under MinGW names (libMSVCRT.a). Tests whose dependencies are built by
+# CMake - i.e. by MSVC on Windows - therefore have to ask for the matching ABI. Tests that
+# build their dependencies with `zig cc` do not: those are gnu on both sides already.
+_BUILD_ZIG_MATCHING_CONAN_ABI = _BUILD_ZIG.replace(
+    'const std = @import("std");',
+    'const std = @import("std");\nconst builtin = @import("builtin");', 1
+).replace(
+    "    const target = b.standardTargetOptions(.{});",
+    "    // Match the ABI of the Conan binaries: MSVC on Windows, native elsewhere.\n"
+    "    var query: std.Target.Query = .{};\n"
+    "    if (builtin.os.tag == .windows) query.abi = .msvc;\n"
+    "    const target = b.standardTargetOptions(.{ .default_target = query });", 1)
+
+
 @pytest.mark.slow
 @pytest.mark.tool("zig")
 def test_zigdeps():
@@ -207,7 +224,7 @@ def test_zigdeps_cmake_deps():
             "liba/comp2.h": comp2_h,
             "liba/comp2.c": comp2_c,
             "conanfile.py": _app_conanfile("liba/1.0"),
-            "build.zig": _BUILD_ZIG,
+            "build.zig": _BUILD_ZIG_MATCHING_CONAN_ABI,
             "main.c": _main_c("comp1_value")})
     c.run("create liba")
     c.run("build .")
@@ -458,7 +475,7 @@ def test_zigdeps_shared_chain_cmake_deps():
             "shareda/shareda.h": shareda_h,
             "shareda/shareda.c": shareda_c,
             "conanfile.py": _app_conanfile("shareda/1.0"),
-            "build.zig": _BUILD_ZIG,
+            "build.zig": _BUILD_ZIG_MATCHING_CONAN_ABI,
             "main.c": _main_c("shared_a_value")})
     c.run("create sharedb")
     c.run("create shareda")
@@ -753,7 +770,7 @@ def test_zigdeps_static_shared_static_chain_cmake_deps():
             "statictop/statictop.h": statictop_h,
             "statictop/statictop.c": statictop_c,
             "conanfile.py": _app_conanfile("statictop/1.0"),
-            "build.zig": _BUILD_ZIG,
+            "build.zig": _BUILD_ZIG_MATCHING_CONAN_ABI,
             "main.c": _main_c("static_top_value")})
     c.run("create staticleaf")
     c.run("create sharedmid")
