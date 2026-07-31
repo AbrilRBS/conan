@@ -355,7 +355,7 @@ def _load_python_file(conan_file_path):
                 spec.loader.exec_module(loaded)
                 sys.dont_write_bytecode = old_dont_write_bytecode
             except ImportError:
-                version_txt = get_attribute_without_loading("required_conan_version", conan_file_path)
+                version_txt = get_attribute_without_loading("required_conan_version", conan_file_path)[0]
                 if version_txt:
                     validate_conan_version(version_txt)
                 raise
@@ -408,11 +408,11 @@ def get_attribute_without_loading(attribute, conan_file_path):
     try:
         found = re.search(fr"(.*){attribute}\s*=\s*[\"'](.*)[\"']", contents)
         if found and "#" not in found.group(1):
-            txt_version = found.group(2)
+            return found.group(2), True
     except:  # noqa this should be solid, cannot fail
         pass
 
-    return txt_version
+    return None, False
 
 
 class ConanFileTextLoader:

@@ -22,7 +22,7 @@ class UploadAPI:
         self._api_helpers = api_helpers
 
     def check_upstream(self, package_list: PackagesList, remote: Remote,
-                       enabled_remotes: List[Remote], force=False, foobar=False):
+                       enabled_remotes: List[Remote], force=False):
         """ Checks ``remote`` for the existence of the recipes and packages in ``package_list``.
         Items that are not present in the remote will add an ``upload`` key to the entry
         with the value ``True``.
@@ -38,16 +38,21 @@ class UploadAPI:
         """
         loader = self._api_helpers.loader
 
-        def _get_upload_policy(conanfile_path, full_load):
-            if full_load:
+        def _get_upload_policy(conanfile_path):
+            policy_val, policy_has_attr = get_attribute_without_loading("upload_policy",
+                                                                        conanfile_path)
+            if policy_has_attr:
+                return policy_val
+            pyreq_val, pyreq_has_attr = get_attribute_without_loading("python_requirements",
+                                                                      conanfile_path)
+            if pyreq_has_attr:
                 conanfile = loader.load_basic(conanfile_path, remotes=enabled_remotes)
                 return conanfile.upload_policy
-            else:
-                return get_attribute_without_loading("upload_policy", conanfile_path)
+            return None
 
         for ref, _ in package_list.items():
             layout = self._api_helpers.cache.recipe_layout(ref)
-            if _get_upload_policy(layout.conanfile(), foobar) == "skip":
+            if _get_upload_policy(layout.conanfile()) == "skip":
                 ConanOutput().info(f"{ref}: Skipping upload of binaries, "
                                    "because upload_policy='skip'")
                 package_list.recipe_dict(ref)["packages"] = {}

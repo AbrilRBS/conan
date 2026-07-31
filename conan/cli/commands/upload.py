@@ -76,9 +76,6 @@ def upload(conan_api: ConanAPI, parser, *args):
     parser.add_argument("-m", "--metadata", action='append',
                         help='Upload the metadata, even if the package is already in the server and '
                              'not uploaded')
-    parser.add_argument('--foobar', default=False, action='store_true',
-                        help='Load the conanfile module when checking the upload_policy attribute, '
-                             'useful if it is defined in a python requires')
 
     args = parser.parse_args(*args)
 
@@ -110,7 +107,7 @@ def upload(conan_api: ConanAPI, parser, *args):
             package_list = _ask_confirm_upload(conan_api, package_list)
 
         conan_api.upload.upload_full(package_list, remote, enabled_remotes, args.check,
-                                     args.force, args.metadata, args.dry_run, args.foobar)
+                                     args.force, args.metadata, args.dry_run)
     else:
         # Don't error on no recipes for automated workflows using list,
         # but warn to tell the user that no packages were uploaded
