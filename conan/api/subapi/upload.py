@@ -10,6 +10,7 @@ from conan.internal.api.uploader import PackagePreparator, UploadExecutor, Uploa
 from conan.internal.rest.pkg_sign import PkgSignaturesPlugin
 from conan.internal.rest.file_uploader import FileUploader
 from conan.internal.errors import AuthenticationException, ForbiddenException
+from conan.internal.loader import get_attribute_without_loading
 from conan.errors import ConanException
 
 
@@ -21,7 +22,7 @@ class UploadAPI:
         self._api_helpers = api_helpers
 
     def check_upstream(self, package_list: PackagesList, remote: Remote,
-                       enabled_remotes: List[Remote], force=False):
+                       enabled_remotes: List[Remote], force=False, foobar=False):
         """ Checks ``remote`` for the existence of the recipes and packages in ``package_list``.
         Items that are not present in the remote will add an ``upload`` key to the entry
         with the value ``True``.
@@ -36,11 +37,17 @@ class UploadAPI:
             uploaded. A ``force_upload`` key will be added to the entries that will be uploaded.
         """
         loader = self._api_helpers.loader
+
+        def _get_upload_policy(conanfile_path, full_load):
+            if full_load:
+                conanfile = loader.load_basic(conanfile_path, remotes=enabled_remotes)
+                return conanfile.upload_policy
+            else:
+                return get_attribute_without_loading("upload_policy", conanfile_path)
+
         for ref, _ in package_list.items():
             layout = self._api_helpers.cache.recipe_layout(ref)
-            conanfile_path = layout.conanfile()
-            conanfile = loader.load_basic(conanfile_path, remotes=enabled_remotes)
-            if conanfile.upload_policy == "skip":
+            if _get_upload_policy(layout.conanfile(), foobar) == "skip":
                 ConanOutput().info(f"{ref}: Skipping upload of binaries, "
                                    "because upload_policy='skip'")
                 package_list.recipe_dict(ref)["packages"] = {}
@@ -80,7 +87,8 @@ class UploadAPI:
         executor.upload(package_list, remote)
 
     def upload_full(self, package_list: PackagesList, remote: Remote, enabled_remotes: List[Remote],
-                    check_integrity=False, force=False, metadata: List[str] = None, dry_run=False):
+                    check_integrity=False, force=False, metadata: List[str] = None, dry_run=False,
+                    foobar=False):
         """ Does the whole process of uploading, including the possibility of parallelizing
         per recipe based on the ``core.upload:parallel`` conf.
 
@@ -117,7 +125,7 @@ class UploadAPI:
                 self._conan_api.cache.check_integrity(pkglist)
             # Check if the recipes/packages are in the remote
             subtitle("Checking server for existing packages")
-            self.check_upstream(pkglist, remote, enabled_remotes, force)
+            self.check_upstream(pkglist, remote, enabled_remotes, force, foobar)
             subtitle("Preparing artifacts for upload")
             self.prepare(pkglist, enabled_remotes, metadata)
 

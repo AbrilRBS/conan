@@ -355,7 +355,7 @@ def _load_python_file(conan_file_path):
                 spec.loader.exec_module(loaded)
                 sys.dont_write_bytecode = old_dont_write_bytecode
             except ImportError:
-                version_txt = _get_required_conan_version_without_loading(conan_file_path)
+                version_txt = get_attribute_without_loading("required_conan_version", conan_file_path)
                 if version_txt:
                     validate_conan_version(version_txt)
                 raise
@@ -398,15 +398,15 @@ def _load_python_file(conan_file_path):
     return loaded, module_id
 
 
-def _get_required_conan_version_without_loading(conan_file_path):
-    # First, try to detect the required_conan_version in "text" mode
+def get_attribute_without_loading(attribute, conan_file_path):
+    # First, try to detect the atribute in "text" mode
     # https://github.com/conan-io/conan/issues/11239
     contents = load(conan_file_path)
 
     txt_version = None
 
     try:
-        found = re.search(r"(.*)required_conan_version\s*=\s*[\"'](.*)[\"']", contents)
+        found = re.search(fr"(.*){attribute}\s*=\s*[\"'](.*)[\"']", contents)
         if found and "#" not in found.group(1):
             txt_version = found.group(2)
     except:  # noqa this should be solid, cannot fail
