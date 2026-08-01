@@ -6,6 +6,9 @@ from conan.internal.paths import CONAN_MANIFEST, COMPRESSIONS, PACKAGE_FILE_NAME
 from conan.internal.util.dates import timestamp_now, timestamp_to_str
 from conan.internal.util.files import load, md5, md5sum, save, gather_files
 
+# The "exports_sources" files are listed in the recipe manifest under this prefix
+EXPORT_SOURCE_PREFIX = "export_source/"
+
 
 class FileTreeManifest:
 
@@ -109,7 +112,7 @@ class FileTreeManifest:
             for name, filepath in export_files.items():
                 # For a symlink: md5 of the pointing path, no matter if broken, relative or absolute.
                 value = md5(os.readlink(filepath)) if os.path.islink(filepath) else md5sum(filepath)
-                file_dict["export_source/%s" % name] = value
+                file_dict["%s%s" % (EXPORT_SOURCE_PREFIX, name)] = value
 
         date = timestamp_now()
 

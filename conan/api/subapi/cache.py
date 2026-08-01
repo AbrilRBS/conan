@@ -193,8 +193,7 @@ class CacheAPI:
                 "information on how to configure the plugin, please read the documentation at "
                 "https://docs.conan.io/2/reference/extensions/package_signing.html.")
 
-        loader = self._api_helpers.loader
-        preparator = PackagePreparator(loader, self._api_helpers.cache,
+        preparator = PackagePreparator(self._api_helpers.cache,
                                        self._api_helpers.remote_manager,
                                        self._api_helpers.global_conf)
         # Some packages can have missing sources/exports_sources

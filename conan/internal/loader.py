@@ -87,7 +87,7 @@ class ConanFileLoader:
             conanfile.recipe_path = Path(conanfile.recipe_folder)
 
             # Load and populate dynamic fields from the data file
-            conan_data = self._load_data(conanfile_path)
+            conan_data = load_conandata(conanfile_path)
             conanfile.conan_data = conan_data
 
             self._cached_conanfile_classes[conanfile_path] = (conanfile, module)
@@ -99,19 +99,6 @@ class ConanFileLoader:
             return result, module
         except ConanException as e:
             raise ConanException("Error loading conanfile at '{}': {}".format(conanfile_path, e))
-
-    @staticmethod
-    def _load_data(conanfile_path):
-        data_path = os.path.join(os.path.dirname(conanfile_path), DATA_YML)
-        if not os.path.exists(data_path):
-            return None
-
-        try:
-            data = yaml.safe_load(load(data_path))
-        except Exception as e:
-            raise ConanException("Invalid yml format at {}: {}".format(DATA_YML, e))
-
-        return data or {}
 
     def load_named(self, conanfile_path, name, version, user, channel, graph_lock=None,
                    remotes=None, update=None, check_update=None, tested_python_requires=None):
@@ -355,7 +342,8 @@ def _load_python_file(conan_file_path):
                 spec.loader.exec_module(loaded)
                 sys.dont_write_bytecode = old_dont_write_bytecode
             except ImportError:
-                version_txt = get_attribute_without_loading("required_conan_version", conan_file_path)[0]
+                version_txt = get_attribute_without_loading("required_conan_version",
+                                                            conan_file_path)[0]
                 if version_txt:
                     validate_conan_version(version_txt)
                 raise
@@ -398,12 +386,25 @@ def _load_python_file(conan_file_path):
     return loaded, module_id
 
 
+def load_conandata(conan_file_path):
+    """ Read the conandata.yml sitting next to a conanfile, without importing the recipe
+    """
+    data_path = os.path.join(os.path.dirname(conan_file_path), DATA_YML)
+    if not os.path.exists(data_path):
+        return None
+
+    try:
+        data = yaml.safe_load(load(data_path))
+    except Exception as e:
+        raise ConanException("Invalid yml format at {}: {}".format(DATA_YML, e))
+
+    return data or {}
+
+
 def get_attribute_without_loading(attribute, conan_file_path):
-    # First, try to detect the atribute in "text" mode
+    # First, try to detect the attribute in "text" mode
     # https://github.com/conan-io/conan/issues/11239
     contents = load(conan_file_path)
-
-    txt_version = None
 
     try:
         found = re.search(fr"(.*){attribute}\s*=\s*[\"'](.*)[\"']", contents)

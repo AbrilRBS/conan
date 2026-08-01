@@ -7,7 +7,8 @@ import tarfile
 import time
 
 from conan.api.output import ConanOutput
-from conan.internal.source import retrieve_exports_sources
+from conan.internal.loader import load_conandata
+from conan.internal.source import retrieve_exports_sources_without_loading
 from conan.internal.errors import NotFoundException
 from conan.errors import ConanException
 from conan.internal.paths import CONAN_MANIFEST, CONANFILE, CONANINFO, COMPRESSIONS, \
@@ -103,8 +104,9 @@ def get_compress_level(compressformat, global_conf):
 
 
 class PackagePreparator:
-    def __init__(self, loader, cache, remote_manager, global_conf):
-        self._loader = loader
+    def __init__(self, cache, remote_manager, global_conf):
+        # Note there is no recipe loader here on purpose: preparing an upload must never import
+        # a recipe, that would execute recipe code in a machine holding the upload credentials
         self._remote_manager = remote_manager
         self._cache = cache
         self._global_conf = global_conf
@@ -119,8 +121,10 @@ class PackagePreparator:
         for ref, packages in pkg_list.items():
             recipe_layout = self._cache.recipe_layout(ref)
             conanfile_path = recipe_layout.conanfile()
-            conanfile = self._loader.load_basic(conanfile_path)
-            url = conanfile.conan_data.get("scm", {}).get("url") if conanfile.conan_data else None
+            # The conandata is read from the file, the recipe must not be imported here, that
+            # would execute recipe code in a machine holding the upload credentials
+            conan_data = load_conandata(conanfile_path)
+            url = conan_data.get("scm", {}).get("url") if conan_data else None
             if local_url != "allow" and url is not None:
                 if not any(url.startswith(v) for v in ("ssh", "git", "http", "file")):
                     raise ConanException(f"Package {ref} contains conandata scm url={url}\n"
@@ -132,7 +136,7 @@ class PackagePreparator:
             bundle.pop("files", None)
             bundle.pop("upload-urls", None)
             if bundle.get("upload") or force:
-                self._prepare_recipe(recipe_layout, ref, bundle, conanfile, enabled_remotes)
+                self._prepare_recipe(recipe_layout, ref, bundle, enabled_remotes)
 
             # Package metadata files too
             if metadata != [""] and (metadata or bundle.get("upload")):
@@ -149,14 +153,14 @@ class PackagePreparator:
                 prev_bundle.pop("upload-urls", None)
                 self._prepare_package(pref, prev_bundle, metadata, force=force)
 
-    def _prepare_recipe(self, recipe_layout, ref, ref_bundle, conanfile, remotes):
+    def _prepare_recipe(self, recipe_layout, ref, ref_bundle, remotes):
         """ do a bunch of things that are necessary before actually executing the upload:
         - retrieve exports_sources to complete the recipe if necessary
         - compress the artifacts in conan_export.tgz and conan_export_sources.tgz
         """
         try:
-            retrieve_exports_sources(self._remote_manager, recipe_layout, conanfile, ref,
-                                     remotes)
+            retrieve_exports_sources_without_loading(self._remote_manager, recipe_layout, ref,
+                                                     remotes)
             cache_files = self._compress_recipe_files(recipe_layout, ref)
             ref_bundle["files"] = cache_files
         except Exception as e:

@@ -43,7 +43,7 @@ class UploadAPI:
                                                                         conanfile_path)
             if policy_has_attr:
                 return policy_val
-            pyreq_val, pyreq_has_attr = get_attribute_without_loading("python_requirements",
+            pyreq_val, pyreq_has_attr = get_attribute_without_loading("python_requires",
                                                                       conanfile_path)
             if pyreq_has_attr:
                 conanfile = loader.load_basic(conanfile_path, remotes=enabled_remotes)
@@ -75,8 +75,7 @@ class UploadAPI:
         if metadata and metadata != [''] and '' in metadata:
             raise ConanException("Empty string and patterns can not be mixed for metadata.")
 
-        loader = self._api_helpers.loader
-        preparator = PackagePreparator(loader, self._api_helpers.cache,
+        preparator = PackagePreparator(self._api_helpers.cache,
                                        self._api_helpers.remote_manager,
                                        self._api_helpers.global_conf)
         preparator.prepare(package_list, enabled_remotes, metadata)
@@ -92,8 +91,7 @@ class UploadAPI:
         executor.upload(package_list, remote)
 
     def upload_full(self, package_list: PackagesList, remote: Remote, enabled_remotes: List[Remote],
-                    check_integrity=False, force=False, metadata: List[str] = None, dry_run=False,
-                    foobar=False):
+                    check_integrity=False, force=False, metadata: List[str] = None, dry_run=False):
         """ Does the whole process of uploading, including the possibility of parallelizing
         per recipe based on the ``core.upload:parallel`` conf.
 
@@ -130,7 +128,7 @@ class UploadAPI:
                 self._conan_api.cache.check_integrity(pkglist)
             # Check if the recipes/packages are in the remote
             subtitle("Checking server for existing packages")
-            self.check_upstream(pkglist, remote, enabled_remotes, force, foobar)
+            self.check_upstream(pkglist, remote, enabled_remotes, force)
             subtitle("Preparing artifacts for upload")
             self.prepare(pkglist, enabled_remotes, metadata)
 

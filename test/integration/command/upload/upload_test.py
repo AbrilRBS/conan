@@ -9,11 +9,11 @@ from unittest.mock import patch
 from requests import Response
 
 from conan.errors import ConanException
-from conan.api.model import PkgReference
+from conan.api.model import PkgReference, RecipeReference
 from conan.internal.api.uploader import gzopen_without_timestamps
 from conan.test.utils.tools import NO_SETTINGS_PACKAGE_ID, TestClient, TestServer, \
     GenConanfile, TestRequester, TestingResponse
-from conan.internal.util.files import is_dirty, save, set_dirty, sha1sum
+from conan.internal.util.files import is_dirty, load, save, set_dirty, sha1sum
 
 conanfile = """from conan import ConanFile
 from conan.tools.files import copy
@@ -572,3 +572,61 @@ def test_upload_to_disabled():
     assert "ERROR: Remote 'default' is disabled" in c.out
     c.run("upload * -c -r=default --allow-disabled")
     assert "tool/0.1: Uploading recipe" in c.out
+
+
+@pytest.mark.parametrize("recipe", [
+    'from conan import ConanFile\nclass Pkg(ConanFile):\n    pass\n',
+    'from conan import ConanFile\nclass Pkg(ConanFile):\n    exports_sources = "*.txt"\n',
+    'from conan import ConanFile\nclass Pkg(ConanFile):\n'
+    '    def export_sources(self):\n        pass\n',
+], ids=["no_sources", "exports_sources", "export_sources_method"])
+def test_upload_does_not_load_recipe(recipe):
+    """ 'conan upload' must not import the recipe module. Doing it executes arbitrary recipe code
+    in a machine that holds the credentials to upload to the server """
+    c = TestClient(default_server_user=True, light=True)
+    c.save({"conanfile.py": recipe, "file.txt": ""})
+    c.run("create . --name=pkg --version=1.0")
+
+    # Poison the recipe in the cache, so that importing its module raises
+    conanfile_path = c.get_latest_ref_layout(RecipeReference.loads("pkg/1.0")).conanfile()
+    save(conanfile_path, 'raise Exception("Recipe module executed!")\n' + load(conanfile_path))
+    # Sanity check, the poisoned recipe does explode if anything imports it
+    c.run("graph info --requires=pkg/1.0", assert_error=True)
+    assert "Recipe module executed!" in c.out
+
+    c.run("upload * -r=default -c")
+    assert "Recipe module executed!" not in c.out
+    assert "pkg/1.0: Uploading recipe" in c.out
+    assert "pkg/1.0: Uploading package" in c.out
+
+
+@pytest.mark.parametrize("exports_sources", [True, False])
+def test_upload_does_not_load_recipe_retrieving_sources(exports_sources):
+    """ Recipes installed from one remote and uploaded to a different one need their exported
+    sources downloaded first. Whether the recipe has them is known from the manifest, so the
+    recipe module is not imported for that either """
+    servers = {f"server{i}": TestServer([("*/*@*/*", "*")], [("*/*@*/*", "*")],
+                                        users={"user": "password"}) for i in range(2)}
+    c = TestClient(servers=servers, inputs=4 * ["user", "password"], light=True)
+    conanfile = GenConanfile("pkg", "1.0")
+    if exports_sources:
+        conanfile = conanfile.with_exports_sources("*.txt")
+    c.save({"conanfile.py": conanfile, "file.txt": ""})
+    c.run("create .")
+    c.run("upload pkg/1.0 -r=server0")
+    c.run("remove * -c")
+
+    # Installing brings the recipe, but not its exported sources
+    c.run("install --requires=pkg/1.0 -r=server0")
+    layout = c.get_latest_ref_layout(RecipeReference.loads("pkg/1.0"))
+    assert not os.path.exists(layout.export_sources())
+    conanfile_path = layout.conanfile()
+    save(conanfile_path, 'raise Exception("Recipe module executed!")\n' + load(conanfile_path))
+
+    c.run("upload pkg/1.0 -r=server1")
+    assert "Recipe module executed!" not in c.out
+    assert "pkg/1.0: Uploading recipe" in c.out
+    if exports_sources:
+        assert "pkg/1.0: Sources downloaded from 'server0'" in c.out
+    else:
+        assert "Sources downloaded" not in c.out

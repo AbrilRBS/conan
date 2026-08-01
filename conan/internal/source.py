@@ -4,6 +4,7 @@ from conan.api.output import ConanOutput
 from conan.internal.methods import run_source_method
 from conan.tools.env import VirtualBuildEnv
 from conan.internal.errors import NotFoundException
+from conan.internal.model.manifest import EXPORT_SOURCE_PREFIX, FileTreeManifest
 from conan.errors import ConanException
 from conan.internal.util.files import is_dirty, mkdir, rmdir, set_dirty_context_manager, merge_directories, clean_dirty
 
@@ -26,13 +27,29 @@ def retrieve_exports_sources(remote_manager, recipe_layout, conanfile, ref, remo
     occassions, conan needs to get them too, like if uploading to a server, to keep the recipes
     complete
     """
+    if os.path.exists(recipe_layout.export_sources()):
+        return None
     if conanfile.exports_sources is None and not hasattr(conanfile, "export_sources"):
         return None
 
-    export_sources_folder = recipe_layout.export_sources()
-    if os.path.exists(export_sources_folder):
+    _download_exports_sources(remote_manager, recipe_layout, ref, remotes)
+
+
+def retrieve_exports_sources_without_loading(remote_manager, recipe_layout, ref, remotes):
+    """ same as retrieve_exports_sources(), but telling if the recipe has exported sources from
+    the recipe manifest, instead of from the recipe attributes. This way the recipe module is not
+    imported, which would execute recipe code in a machine holding the credentials to upload
+    """
+    if os.path.exists(recipe_layout.export_sources()):
+        return None
+    manifest = FileTreeManifest.load(recipe_layout.export())
+    if not any(f.startswith(EXPORT_SOURCE_PREFIX) for f in manifest.files()):
         return None
 
+    _download_exports_sources(remote_manager, recipe_layout, ref, remotes)
+
+
+def _download_exports_sources(remote_manager, recipe_layout, ref, remotes):
     for r in remotes:
         sources_remote = _try_get_sources(ref, remote_manager, recipe_layout, r)
         if sources_remote:
