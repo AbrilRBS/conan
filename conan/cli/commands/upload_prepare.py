@@ -1,21 +1,21 @@
 from conan.api.conan_api import ConanAPI
-from conan.api.model import ListPattern, MultiPackagesList, PackagesList
+from conan.api.model import ListPattern, MultiPackagesList
 from conan.api.output import ConanOutput
 from conan.cli import make_abs_path
 from conan.cli.command import conan_command, OnceArgument
 from conan.cli.commands.list import print_list_json, print_serial
-from conan.api.input import UserInput
+from conan.cli.commands.upload import ask_confirm_upload
 from conan.errors import ConanException
 
 
-def summary_upload_list(results):
+def summary_prepare_list(results):
     """ Do a little format modification to serialized
     package list, so it looks prettier on text output
     """
-    ConanOutput().subtitle("Upload summary")
+    ConanOutput().subtitle("Prepared upload summary")
     info = results["results"]
 
-    def format_upload(item):
+    def format_prepare(item):
         if isinstance(item, dict):
             result = {}
             for k, v in item.items():
@@ -23,59 +23,64 @@ def summary_upload_list(results):
                     v.pop("info", None)
                     v.pop("timestamp", None)
                     v.pop("files", None)
-                    v.pop("upload-urls", None)
                     upload_value = v.pop("upload", None)
                     if upload_value is not None:
-                        msg = "Uploaded" if upload_value else "Skipped, already in server"
+                        msg = "To upload" if upload_value else "Already in server, will be skipped"
                         force_upload = v.pop("force_upload", None)
                         if force_upload:
-                            msg += " - forced"
+                            msg = "To upload - forced"
                         k = f"{k} ({msg})"
-                result[k] = format_upload(v)
+                result[k] = format_prepare(v)
             return result
         return item
-    info = {remote: format_upload(values) for remote, values in info.items()}
+    info = {remote: format_prepare(values) for remote, values in info.items()}
     print_serial(info)
 
 
-@conan_command(group="Creator", formatters={"text": summary_upload_list,
+@conan_command(group="Creator", formatters={"text": summary_prepare_list,
                                             "json": print_list_json})
-def upload(conan_api: ConanAPI, parser, *args):
+def upload_prepare(conan_api: ConanAPI, parser, *args):
     """
-    Upload packages to a remote.
+    (Experimental) Prepare an upload without transferring anything, for 'conan upload-artifacts'.
 
-    By default, all the matching references are uploaded (all revisions).
-    By default, if a recipe reference is specified, it will upload all the revisions for all the
-    binary packages, unless --only-recipe is specified. You can use the "latest" placeholder at the
-    "reference" argument to specify the latest revision of the recipe or the package.
+    This is the first half of 'conan upload': it checks which revisions the remote already has,
+    applies the recipes 'upload_policy', and compresses the artifacts, leaving them ready in the
+    cache. The resulting package list, saved with '--format=json', is the input of
+    'conan upload-artifacts', which does the transfer. Its paths are relative to the cache
+    folder, so the two steps can run with the cache in different locations.
+
+    Preparing reads the recipes, and reading a recipe imports it, which executes its code. Split
+    this way, that only happens here, and never in the step that holds the upload credentials.
+    This step only reads from the remotes, it never writes to them, so it should be given
+    read-only credentials.
     """
     parser.add_argument('pattern', nargs="?",
                         help="A pattern in the form 'pkg/version#revision:package_id#revision', "
                              "e.g: \"zlib/1.2.13:*\" means all binaries for zlib/1.2.13. "
                              "If revision is not specified, it is assumed latest one.")
     parser.add_argument('-p', '--package-query', default=None, action=OnceArgument,
-                        help="Only upload packages matching a specific query. e.g: os=Windows AND "
+                        help="Only prepare packages matching a specific query. e.g: os=Windows AND "
                              "(arch=x86 OR compiler=gcc)")
-    # using required, we may want to pass this as a positional argument?
     parser.add_argument("-r", "--remote", action=OnceArgument, required=True,
-                        help='Upload to this specific remote')
+                        help='Prepare the upload for this specific remote, which is only read '
+                             'from, so read-only credentials are enough. The result is only '
+                             'valid for it, and it is the remote that must later be passed to '
+                             '"conan upload-artifacts"')
     parser.add_argument("--only-recipe", action='store_true', default=False,
-                        help='Upload only the recipe/s, not the binary packages.')
+                        help='Prepare only the recipe/s, not the binary packages.')
     parser.add_argument("--force", action='store_true', default=False,
-                        help='Force the upload of the artifacts even if the revision already exists'
-                             ' in the server')
+                        help='Prepare the artifacts even if the revision already exists in the '
+                             'server')
     parser.add_argument("--check", action='store_true', default=False,
-                        help='Perform an integrity check, using the manifests, before upload')
+                        help='Perform an integrity check, using the manifests')
     parser.add_argument('-c', '--confirm', default=False, action='store_true',
-                        help='Upload all matching recipes without confirmation')
-    parser.add_argument('--dry-run', default=False, action='store_true',
-                        help='Do not execute the real upload (experimental)')
+                        help='Prepare all matching recipes without confirmation')
     parser.add_argument('--allow-disabled', default=False, action='store_true',
-                        help='Allow uploading to disabled remote')
+                        help='Allow preparing for a disabled remote')
     parser.add_argument("-l", "--list", help="Package list file")
     parser.add_argument("-m", "--metadata", action='append',
-                        help='Upload the metadata, even if the package is already in the server and '
-                             'not uploaded')
+                        help='Prepare the metadata, even if the package is already in the server '
+                             'and not uploaded')
 
     args = parser.parse_args(*args)
 
@@ -106,12 +111,12 @@ def upload(conan_api: ConanAPI, parser, *args):
         if not args.list and not args.confirm and "*" in args.pattern:
             package_list = ask_confirm_upload(conan_api, package_list)
 
-        conan_api.upload.upload_full(package_list, remote, enabled_remotes, args.check,
-                                     args.force, args.metadata, args.dry_run)
+        conan_api.upload.prepare_full(package_list, remote, enabled_remotes, args.check,
+                                      args.force, args.metadata)
     else:
         # Don't error on no recipes for automated workflows using list,
-        # but warn to tell the user that no packages were uploaded
-        ConanOutput().warning("No packages were uploaded because the selection is empty.")
+        # but warn to tell the user that nothing was prepared
+        ConanOutput().warning("Nothing was prepared because the selection is empty.")
 
     pkglist = MultiPackagesList()
     pkglist.add(remote.name, package_list)
@@ -119,21 +124,3 @@ def upload(conan_api: ConanAPI, parser, *args):
         "results": pkglist.serialize(),
         "conan_api": conan_api
     }
-
-
-def ask_confirm_upload(conan_api, package_list):
-    ui = UserInput(conan_api.config.get("core:non_interactive"))
-    result = PackagesList()
-    for ref, packages in package_list.items():
-        msg = f"Are you sure you want to upload recipe '{ref.repr_notime()}'?"
-        if ui.request_boolean(msg):
-            result.add_ref(ref)
-            ref_dict = package_list.recipe_dict(ref).copy()
-            ref_dict.pop("packages", None)
-            result.recipe_dict(ref).update(ref_dict)
-            for pref, pkg_id_info in packages.items():
-                msg = f"Are you sure you want to upload package '{pref.repr_notime()}'?"
-                if ui.request_boolean(msg):
-                    result.add_pref(pref, pkg_id_info)
-                    result.package_dict(pref).update(package_list.package_dict(pref))
-    return result

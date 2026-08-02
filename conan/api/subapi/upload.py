@@ -5,7 +5,7 @@ from typing import List
 
 from conan.api.model import PackagesList, Remote
 from conan.api.output import ConanOutput
-from conan.internal.api.upload import add_urls
+from conan.internal.api.upload import add_urls, make_files_absolute, make_files_relative
 from conan.internal.api.uploader import PackagePreparator, UploadExecutor, UploadUpstreamChecker
 from conan.internal.rest.pkg_sign import PkgSignaturesPlugin
 from conan.internal.rest.file_uploader import FileUploader
@@ -79,6 +79,109 @@ class UploadAPI:
         executor = UploadExecutor(self._api_helpers.remote_manager)
         executor.upload(package_list, remote)
 
+    def _parallel_pkglists(self, package_list, func, threads_msg):
+        """ Run ``func`` over the package list, possibly splitting it per recipe and running
+        those in parallel, based on the ``core.upload:parallel`` conf
+        """
+        parallel = self._conan_api.config.get("core.upload:parallel", default=1, check_type=int)
+        thread_pool = ThreadPool(parallel) if parallel > 1 else None
+        if not thread_pool or len(package_list._data) <= 1:  # FIXME: Iteration when multiple rrevs
+            func(package_list, subtitle=ConanOutput().subtitle)
+        else:
+            ConanOutput().subtitle(threads_msg.format(parallel=parallel))
+            thread_pool.map(func, package_list.split())
+        if thread_pool:
+            thread_pool.close()
+            thread_pool.join()
+
+    def prepare_full(self, package_list: PackagesList, remote: Remote,
+                     enabled_remotes: List[Remote], check_integrity=False, force=False,
+                     metadata: List[str] = None):
+        """ Does everything that ``upload_full()`` does except the transfer of the artifacts:
+        checks integrity, checks the upload policy of the recipes, checks which revisions already
+        exist in the server, and compresses the artifacts.
+
+        The resulting ``package_list`` records which artifacts have to be uploaded and where they
+        are in the cache, with paths relative to the cache folder, so it can be serialized and
+        handed over to ``upload_artifacts()``, even in a different machine or container.
+
+        This is the half of the upload that reads the recipes, and reading a recipe means
+        importing it, which executes its code. Splitting it out lets it run somewhere that does
+        not hold the credentials to write to the server. Nothing here writes to any remote, only
+        reads from them, so it only needs read-only credentials. See ``upload_artifacts()``.
+
+        :param package_list: A PackagesList object with the recipes and packages to prepare.
+            It is modified in place with the results.
+        :param remote: The remote the artifacts are being prepared for. Its existing revisions
+            are queried, so the resulting package list is only valid for this remote.
+            Read-only access to it is enough.
+        :param enabled_remotes: A list of remotes that are enabled in the client.
+            Recipe sources will attempt to be fetched from these remotes,
+            and to possibly load python_requires from the listed recipes if necessary.
+            Read-only access to them is enough.
+        :param check_integrity: If ``True``, it will check the integrity of the cache packages
+            before preparing them.
+        :param force: If ``True``, it will mark for upload the recipes and packages even if they
+            already exist in the remote.
+        :param metadata: A list of patterns of metadata that should be uploaded.
+            Default ``None`` means all metadata will be uploaded together with the package
+            artifacts. If metadata contains an empty string (``""``), it means that no metadata
+            files should be uploaded.
+        """
+        def _prepare_pkglist(pkglist, subtitle=lambda _: None):
+            if check_integrity:
+                subtitle("Checking integrity of cache packages")
+                self._conan_api.cache.check_integrity(pkglist)
+            # Check if the recipes/packages are in the remote
+            subtitle("Checking server for existing packages")
+            self.check_upstream(pkglist, remote, enabled_remotes, force)
+            subtitle("Preparing artifacts for upload")
+            self.prepare(pkglist, enabled_remotes, metadata)
+
+        t = time.time()
+        ConanOutput().title(f"Preparing upload to remote {remote.name}")
+        self._parallel_pkglists(package_list, _prepare_pkglist,
+                                "Preparing with {parallel} parallel threads")
+        make_files_relative(package_list, self._conan_api.cache_folder)
+        elapsed = time.time() - t
+        ConanOutput().success(f"Upload prepared in {int(elapsed)}s\n")
+
+    def upload_artifacts(self, package_list: PackagesList, remote: Remote, dry_run=False):
+        """ Uploads the artifacts that ``prepare_full()`` already selected and compressed, and
+        the associated sources backups if any.
+
+        Everything this needs is in ``package_list``: which artifacts to upload and where they
+        are in the cache. No recipe is read, and therefore no recipe code is executed, so this
+        can run in a machine that holds the credentials for the server without exposing them to
+        arbitrary recipe code.
+
+        :param package_list: A PackagesList object as left by ``prepare_full()``, with the paths
+            of the artifacts relative to the cache folder, which are resolved against this
+            cache. Paths pointing outside of the cache are rejected. Preparing it against a
+            different remote than ``remote`` is not valid, the decisions it records about what
+            has to be uploaded are specific to one remote.
+        :param remote: The remote to upload the artifacts to.
+        :param dry_run: If ``True``, it will not perform the actual upload.
+        """
+        make_files_absolute(package_list, self._conan_api.cache_folder)
+
+        def _upload_pkglist(pkglist, subtitle=lambda _: None):
+            if not dry_run:
+                subtitle("Uploading artifacts")
+                self._upload(pkglist, remote)
+                backup_files = self._conan_api.cache.get_backup_sources(pkglist)
+                self.upload_backup_sources(backup_files)
+
+        t = time.time()
+        ConanOutput().title(f"Uploading to remote {remote.name}")
+        self._parallel_pkglists(package_list, _upload_pkglist,
+                                "Uploading with {parallel} parallel threads")
+        elapsed = time.time() - t
+        ConanOutput().success(f"Upload completed in {int(elapsed)}s\n")
+        add_urls(package_list, remote)
+        # Leave the list as it was received, the paths of this workflow are cache relative
+        make_files_relative(package_list, self._conan_api.cache_folder)
+
     def upload_full(self, package_list: PackagesList, remote: Remote, enabled_remotes: List[Remote],
                     check_integrity=False, force=False, metadata: List[str] = None, dry_run=False):
         """ Does the whole process of uploading, including the possibility of parallelizing
@@ -93,6 +196,9 @@ class UploadAPI:
             - prepares the artifacts to upload (compresses the conan_package.tgz)
             - executes the actual upload
             - uploads associated sources backups if any
+
+        See ``prepare_full()`` and ``upload_artifacts()`` to run these two halves as separate
+        steps, so that only the first one reads recipes, and therefore executes their code.
 
         :param package_list: A PackagesList object with the recipes and packages to upload.
         :param remote: The remote to upload the packages to.
@@ -129,16 +235,8 @@ class UploadAPI:
 
         t = time.time()
         ConanOutput().title(f"Uploading to remote {remote.name}")
-        parallel = self._conan_api.config.get("core.upload:parallel", default=1, check_type=int)
-        thread_pool = ThreadPool(parallel) if parallel > 1 else None
-        if not thread_pool or len(package_list._data) <= 1:  # FIXME: Iteration when multiple rrevs
-            _upload_pkglist(package_list, subtitle=ConanOutput().subtitle)
-        else:
-            ConanOutput().subtitle(f"Uploading with {parallel} parallel threads")
-            thread_pool.map(_upload_pkglist, package_list.split())
-        if thread_pool:
-            thread_pool.close()
-            thread_pool.join()
+        self._parallel_pkglists(package_list, _upload_pkglist,
+                                "Uploading with {parallel} parallel threads")
         elapsed = time.time() - t
         ConanOutput().success(f"Upload completed in {int(elapsed)}s\n")
         add_urls(package_list, remote)
