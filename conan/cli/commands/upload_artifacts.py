@@ -6,19 +6,37 @@ from conan.cli.command import conan_command, OnceArgument
 from conan.cli.commands.list import print_list_json
 from conan.cli.commands.upload import summary_upload_list
 from conan.errors import ConanException
+from conan.internal.api.upload import find_unprepared
 
 
-def _is_prepared(package_list):
-    """ A package list straight out of "conan list" has no record of what has to be uploaded,
-    only one that went through "conan upload-prepare" does
+def _looks_uploaded(package_list):
+    """ Whether the list carries upload decisions without being prepared, which is what the
+    output of "conan upload" looks like. Only used to tell the user which mistake they made
     """
-    for ref, packages in package_list.items():
-        if "upload" in package_list.recipe_dict(ref):
-            return True
-        for pref in packages:
-            if "upload" in package_list.package_dict(pref):
-                return True
-    return False
+    return any("upload" in rrev_dict
+               for ref_dict in package_list._data.values()  # noqa
+               for rrev_dict in ref_dict.get("revisions", {}).values())
+
+
+def _unprepared_error(listfile, remote_name, package_list, unprepared):
+    total = len(package_list._data)  # noqa
+    if len(unprepared) >= total:  # nothing in it was prepared at all
+        if _looks_uploaded(package_list):
+            what = (f"The package list '{listfile}' looks like the output of 'conan upload', "
+                    f"not of 'conan upload-prepare'.")
+        else:
+            what = (f"The package list '{listfile}' is a plain package list, it has not been "
+                    f"prepared for upload.")
+        return (f"{what}\nPrepare it first, and upload the result:\n"
+                f"\tconan upload-prepare -l {listfile} -r={remote_name} --format=json "
+                f"> prepared.json\n"
+                f"\tconan upload-artifacts -l prepared.json -r={remote_name}")
+    listed = "\n".join(f"\t{u}" for u in unprepared[:10])
+    more = f"\n\t... and {len(unprepared) - 10} more" if len(unprepared) > 10 else ""
+    return (f"The package list '{listfile}' is only partly prepared for upload, these entries "
+            f"were not:\n{listed}{more}\n"
+            f"Uploading it would silently leave them out. This is what merging a prepared "
+            f"package list with one that is not looks like, prepare them all before merging")
 
 
 @conan_command(group="Creator", formatters={"text": summary_upload_list,
@@ -62,10 +80,10 @@ def upload_artifacts(conan_api: ConanAPI, parser, *args):
     package_list = multi_package_list[remote.name]
 
     if package_list:
-        if not _is_prepared(package_list):
-            raise ConanException(f"The package list '{args.list}' has not been prepared for "
-                                 f"upload.\nRun 'conan upload-prepare ... -r={remote.name} "
-                                 f"--format=json' first and use its output here")
+        unprepared = find_unprepared(package_list)
+        if unprepared:
+            raise ConanException(_unprepared_error(args.list, remote.name, package_list,
+                                                   unprepared))
         conan_api.upload.upload_artifacts(package_list, remote, args.dry_run)
     else:
         # Don't error on no recipes for automated workflows using list,

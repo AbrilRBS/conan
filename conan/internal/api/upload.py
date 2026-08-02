@@ -5,6 +5,50 @@ from conan.internal.rest.client_routes import ClientV2Router
 from conan.internal.util.files import sha1sum
 
 
+# Mark that "conan upload-prepare" leaves on everything it prepares, so that
+# "conan upload-artifacts" can tell a prepared list from any other package list. It goes in every
+# revision, and not once for the whole document, because that is the granularity at which package
+# lists are merged, and because the pkglist formatters treat every top level key as a remote name
+# and every key below it as a reference
+UPLOAD_PREPARED = "upload-prepared"
+UPLOAD_PREPARED_FORMAT = 1
+
+
+def mark_prepared(package_list):
+    """ Mark every entry of the package list as prepared for upload """
+    for ref, packages in package_list.items():
+        package_list.recipe_dict(ref)[UPLOAD_PREPARED] = UPLOAD_PREPARED_FORMAT
+        for pref in packages:
+            package_list.package_dict(pref)[UPLOAD_PREPARED] = UPLOAD_PREPARED_FORMAT
+
+
+def find_unprepared(package_list):
+    """ The entries of the package list that were not left there by "conan upload-prepare".
+
+    This walks the raw data instead of iterating the package list, because ``items()`` silently
+    skips the references that have no recipe revision, and merging a plain package list into a
+    prepared one is precisely how those appear.
+
+    Package entries without a package revision are not reported: they are invisible to every
+    upload path, prepared or not, "conan upload" ignores them just the same
+    """
+    unprepared = []
+    for ref, ref_dict in package_list._data.items():  # noqa, no iteration can skip entries here
+        revisions = ref_dict.get("revisions")
+        if not revisions:
+            unprepared.append(ref)
+            continue
+        for rrev, rrev_dict in revisions.items():
+            if UPLOAD_PREPARED not in rrev_dict:
+                unprepared.append(f"{ref}#{rrev}")
+                continue
+            for pkg_id, pkg_dict in rrev_dict.get("packages", {}).items():
+                for prev, prev_dict in pkg_dict.get("revisions", {}).items():
+                    if UPLOAD_PREPARED not in prev_dict:
+                        unprepared.append(f"{ref}#{rrev}:{pkg_id}#{prev}")
+    return unprepared
+
+
 def _convert_files(package_list, convert):
     for ref, packages in package_list.items():
         ref_info = package_list.recipe_dict(ref)

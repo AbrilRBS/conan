@@ -6,6 +6,7 @@ from conan.cli.command import conan_command, OnceArgument
 from conan.cli.commands.list import print_list_json, print_serial
 from conan.api.input import UserInput
 from conan.errors import ConanException
+from conan.internal.api.upload import UPLOAD_PREPARED
 
 
 def summary_upload_list(results):
@@ -24,6 +25,7 @@ def summary_upload_list(results):
                     v.pop("timestamp", None)
                     v.pop("files", None)
                     v.pop("upload-urls", None)
+                    v.pop(UPLOAD_PREPARED, None)
                     upload_value = v.pop("upload", None)
                     if upload_value is not None:
                         msg = "Uploaded" if upload_value else "Skipped, already in server"

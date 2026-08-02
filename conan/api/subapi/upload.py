@@ -5,7 +5,8 @@ from typing import List
 
 from conan.api.model import PackagesList, Remote
 from conan.api.output import ConanOutput
-from conan.internal.api.upload import add_urls, make_files_absolute, make_files_relative
+from conan.internal.api.upload import (add_urls, make_files_absolute, make_files_relative,
+                                       mark_prepared)
 from conan.internal.api.uploader import PackagePreparator, UploadExecutor, UploadUpstreamChecker
 from conan.internal.rest.pkg_sign import PkgSignaturesPlugin
 from conan.internal.rest.file_uploader import FileUploader
@@ -142,6 +143,7 @@ class UploadAPI:
         ConanOutput().title(f"Preparing upload to remote {remote.name}")
         self._parallel_pkglists(package_list, _prepare_pkglist,
                                 "Preparing with {parallel} parallel threads")
+        mark_prepared(package_list)
         make_files_relative(package_list, self._conan_api.cache_folder)
         elapsed = time.time() - t
         ConanOutput().success(f"Upload prepared in {int(elapsed)}s\n")

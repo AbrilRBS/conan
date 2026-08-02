@@ -174,9 +174,9 @@ def test_upload_artifacts_prepared_for_another_remote():
     assert "conan upload-prepare ... -r=other" in c.out
 
 
-def test_upload_artifacts_list_not_prepared():
-    """ A package list straight out of 'conan list' records nothing about what to upload, using
-    it must not silently upload nothing """
+def test_upload_artifacts_plain_list():
+    """ A package list straight out of 'conan list' was never prepared, using it must not
+    silently upload nothing """
     c = _client()
     c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
     c.run("create .")
@@ -186,8 +186,59 @@ def test_upload_artifacts_list_not_prepared():
     c.save({"plain.json": plain})
 
     c.run("upload-artifacts -l plain.json -r=default", assert_error=True)
-    assert "has not been prepared for upload" in c.out
-    assert "conan upload-prepare ... -r=default --format=json" in c.out
+    assert "is a plain package list, it has not been prepared for upload" in c.out
+    # And it says exactly how to fix it, that same file is valid input for upload-prepare
+    assert "conan upload-prepare -l plain.json -r=default --format=json > prepared.json" in c.out
+    assert "conan upload-artifacts -l prepared.json -r=default" in c.out
+
+
+def test_upload_artifacts_list_from_conan_upload():
+    """ The output of 'conan upload' carries upload decisions but was not prepared by
+    'conan upload-prepare', and the error says so instead of talking about plain lists """
+    c = _client()
+    c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
+    c.run("create .")
+    c.run("upload * -r=default -c --format=json", redirect_stdout="uploaded.json")
+
+    c.run("upload-artifacts -l uploaded.json -r=default", assert_error=True)
+    assert "looks like the output of 'conan upload', not of 'conan upload-prepare'" in c.out
+
+
+def test_upload_artifacts_partially_prepared_list():
+    """ 'conan pkglist merge' can mix a prepared list with one that is not, and uploading that
+    would silently leave the unprepared half out """
+    c = _client()
+    c.save({"conanfile.py": GenConanfile()})
+    c.run("create . --name=liba --version=1.0")
+    c.run("create . --name=libb --version=1.0")
+    c.run("upload-prepare liba/1.0 -r=default -c --format=json", redirect_stdout="prep.json")
+    c.run("list libb/1.0:* --format=json", redirect_stdout="plain.json")
+    c.save({"plain.json": c.load("plain.json").replace('"Local Cache"', '"default"', 1)})
+    c.run("pkglist merge -l prep.json -l plain.json --format=json", redirect_stdout="mix.json")
+
+    c.run("upload-artifacts -l mix.json -r=default", assert_error=True)
+    assert "is only partly prepared for upload, these entries were not" in c.out
+    assert "libb/1.0" in c.out
+    assert "liba/1.0" not in c.out.split("these entries were not")[1]
+    c.run("list *:* -r=default")
+    assert "liba/1.0" not in c.out  # nothing was uploaded, not even the prepared half
+
+
+def test_merge_two_prepared_lists():
+    """ Preparing on several agents and merging before a single upload has to keep working """
+    c = _client()
+    c.save({"conanfile.py": GenConanfile()})
+    c.run("create . --name=liba --version=1.0")
+    c.run("create . --name=libb --version=1.0")
+    c.run("upload-prepare liba/1.0 -r=default -c --format=json", redirect_stdout="a.json")
+    c.run("upload-prepare libb/1.0 -r=default -c --format=json", redirect_stdout="b.json")
+    c.run("pkglist merge -l a.json -l b.json --format=json", redirect_stdout="merged.json")
+    # The merged list is still a valid package list for the text formatters
+    c.run("pkglist merge -l a.json -l b.json")
+
+    c.run("upload-artifacts -l merged.json -r=default")
+    assert "liba/1.0: Uploading recipe" in c.out
+    assert "libb/1.0: Uploading recipe" in c.out
 
 
 def test_upload_artifacts_empty_list():
