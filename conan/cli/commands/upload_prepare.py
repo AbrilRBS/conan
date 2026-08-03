@@ -10,20 +10,30 @@ from conan.internal.api.upload import UPLOAD_PREPARED, find_unpreparable
 
 
 def _single_package_list(multi_package_list, listfile):
-    """ The one package list in the file. "conan list" keys its output by "Local Cache" and
-    "conan upload-prepare" keys its own by the remote name, so accept either: preparing an already
-    prepared list is how it is re-targeted at another remote, and it has to work
+    """ The one package list in the file, whatever it happens to be keyed by.
+
+    The key is not fixed, only how many there can be. "conan list" keys its output by what it
+    queried: "Local Cache" when no remote is given, the name of each remote that is, and both when
+    the cache is asked for alongside a remote. "conan upload-prepare" keys its own by the remote it
+    prepared for, and that output is valid input here, because preparing it again re-targets it.
+
+    So anything with a single key is taken, and several is an error rather than a guess: picking
+    one would silently leave the rest unprepared and unuploaded.
+
+    The key says where the packages were found, and it is not checked against anything: preparing
+    compresses artifacts out of the local cache, so that is where they have to be. A listing of a
+    remote is not valid input, however it is keyed, and fails on the first reference that is not
+    in the cache
     """
     names = list(multi_package_list.lists)
-    if "Local Cache" in names:
-        return multi_package_list["Local Cache"]
     if len(names) == 1:
         return multi_package_list[names[0]]
-    listed = ", ".join(f"'{n}'" for n in names) or "nothing"
+    if not names:
+        raise ConanException(f"The package list '{listfile}' has no entries")
+    listed = ", ".join(f"'{n}'" for n in names)
     raise ConanException(f"The package list '{listfile}' has entries for {listed}, and preparing "
-                         f"is done for one remote at a time.\nPass a list holding a single set of "
-                         f"entries: what 'conan list' writes, or what one 'conan upload-prepare' "
-                         f"run writes")
+                         f"is done for one set of packages at a time.\nPass a list holding a "
+                         f"single one, so that nothing is silently left out")
 
 
 def summary_prepare_list(results):
@@ -65,7 +75,8 @@ def upload_prepare(conan_api: ConanAPI, parser, *args):
 
     This is the first half of 'conan upload': it checks which revisions the remote already has,
     applies the recipes 'upload_policy', and compresses the artifacts, leaving them ready in the
-    cache. The resulting package list, saved with '--format=json', is the input of
+    cache. It always works from the local cache, which is where the artifacts to compress are.
+    The resulting package list, saved with '--format=json', is the input of
     'conan upload-artifacts', which does the transfer. It holds absolute paths, so both
     steps need to see the same cache.
 
@@ -98,9 +109,10 @@ def upload_prepare(conan_api: ConanAPI, parser, *args):
     parser.add_argument('--allow-disabled', default=False, action='store_true',
                         help='Allow preparing for a disabled remote')
     parser.add_argument("-l", "--list",
-                        help="Package list file. The output of a previous 'conan upload-prepare' "
-                             "is accepted too, and preparing it again re-targets it at the remote "
-                             "given here")
+                        help="Package list file, of packages in the local cache. The output of a "
+                             "previous 'conan upload-prepare' is accepted too, and preparing it "
+                             "again re-targets it at the remote given here. A listing of a remote "
+                             "('conan list -r=...') is not: there is nothing local to compress")
     parser.add_argument("-m", "--metadata", action='append',
                         help='Prepare the metadata, even if the package is already in the server '
                              'and not uploaded')

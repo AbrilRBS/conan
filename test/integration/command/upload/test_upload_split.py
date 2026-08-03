@@ -432,6 +432,38 @@ def test_upload_artifacts_error_entry_in_the_list():
     assert "Traceback" not in c.out
 
 
+def test_prepare_needs_the_packages_in_the_local_cache():
+    """ A 'conan list -r' output describes what is on that remote, and preparing compresses
+    artifacts out of the local cache, so it is not valid input however it is keyed. It fails on
+    the first reference that is not there rather than uploading something else """
+    c = _client()
+    c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
+    c.run("create .")
+    c.run("upload * -r=default -c")
+    c.run("remove * -c")  # on the server, no longer in the cache
+    c.run('list "*#*:*#*" -r=default --format=json', redirect_stdout="remote.json")
+
+    c.run("upload-prepare -l remote.json -r=default", assert_error=True)
+    assert "not found" in c.out
+    assert "Uploading" not in c.out
+
+
+def test_prepare_rejects_a_list_holding_several_sets():
+    """ 'conan list' keys its output by what it queried, so asking for the cache alongside a
+    remote produces two sets. Preparing is for one at a time, and picking one would silently
+    leave the other unprepared """
+    c = _client()
+    c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
+    c.run("create .")
+    c.run("upload * -r=default -c")
+    c.run('list "*" -c -r=default --format=json', redirect_stdout="both.json")
+    assert list(json.loads(c.load("both.json"))) == ["Local Cache", "default"]
+
+    c.run("upload-prepare -l both.json -r=default", assert_error=True)
+    assert "has entries for 'Local Cache', 'default'" in c.out
+    assert "one set of packages at a time" in c.out
+
+
 def test_prepare_warns_about_entries_without_revisions():
     """ A coarse "conan list" query reports no revisions, and those entries can neither be
     prepared nor uploaded. Warn instead of dropping them silently """
