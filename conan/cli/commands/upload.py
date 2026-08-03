@@ -8,7 +8,7 @@ from conan.api.input import UserInput
 from conan.errors import ConanException
 
 
-def _package_list_from_file(multi_package_list, listfile):
+def _package_list_from_file(multi_package_list, listfile, remote):
     """ The package list to work with, out of a package list file.
 
     "conan list" keys its output by "Local Cache", or by the name of the remote it queried, and
@@ -20,7 +20,8 @@ def _package_list_from_file(multi_package_list, listfile):
     if "Local Cache" in names:
         return multi_package_list["Local Cache"]
     if len(names) == 1:
-        return multi_package_list[names[0]]
+        assert names[0] == remote
+        return multi_package_list[remote]
     if not names:
         raise ConanException(f"The package list '{listfile}' has no entries")
     listed = ", ".join(f"'{n}'" for n in names)
@@ -114,7 +115,7 @@ def upload(conan_api: ConanAPI, parser, *args):
     if args.list:
         listfile = make_abs_path(args.list)
         multi_package_list = MultiPackagesList.load(listfile)
-        package_list = _package_list_from_file(multi_package_list, args.list)
+        package_list = _package_list_from_file(multi_package_list, args.list, args.remote)
         if args.only_recipe:
             package_list.only_recipes()
     else:
