@@ -93,7 +93,7 @@ def upload(conan_api: ConanAPI, parser, *args):
     is_prepared = False
 
     if args.list:
-        package_list, is_prepared = conan_api.upload.get_pkglist_to_upload(args.list, args.remote)
+        package_list, is_prepared = conan_api.upload.get_pkglist_to_upload(args.list, remote)
         if args.only_recipe:
             package_list.only_recipes()
     else:

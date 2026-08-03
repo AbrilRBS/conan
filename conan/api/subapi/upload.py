@@ -111,6 +111,12 @@ class UploadAPI:
             it means that no metadata files should be uploaded.
         :param dry_run: If ``True``, it will not perform the actual upload,
             but will still prepare the artifacts and check the upstream.
+        :param is_prepared: If ``True``, ``package_list`` is taken as already prepared by an
+            earlier ``dry_run`` call, so the whole preparation is skipped: no integrity check, no
+            asking the remote what it already has, and no compressing. Only the transfer is done,
+            from the artifacts the list points at. Note this means the upstream check is *not*
+            repeated, so anything uploaded to the remote between the two calls goes unnoticed.
+            ``get_pkglist_to_upload()`` returns the value to pass here.
         """
 
         def _upload_pkglist(pkglist, subtitle=lambda _: None):
@@ -195,33 +201,36 @@ class UploadAPI:
     @staticmethod
     def get_pkglist_to_upload(list_path: str, remote: Remote):
         """ The package list to work with, out of a package list file, and whether it is already
-            prepared.
+        prepared.
 
-            "conan list" keys its output by "Local Cache", or by the name of the remote it queried, and
-            "conan upload" keys its own by the remote it uploaded to. That last one matters: the output of
-            a "conan upload --dry-run" is meant to be fed back here, so that the artifacts it already
-            prepared are uploaded without preparing them again.
+        ``conan list`` keys its output by ``"Local Cache"``, or by the name of the remote it
+        queried, and ``conan upload`` keys its own by the remote it uploaded to. That last one
+        matters: the output of a ``conan upload --dry-run`` is meant to be fed back here, so that
+        the artifacts it already prepared are uploaded without preparing them again.
 
-            A list keyed by a remote has to be uploaded to that same remote, and has to be fully prepared:
-            what has to be uploaded was decided by asking that server what it already had. A "Local Cache"
-            one is a plain "conan list" output, so nothing in it is prepared and everything is done here.
-            Those are the only two shapes, half prepared lists are not supported
+        A list keyed by a remote has to be uploaded to that same remote, and has to be fully
+        prepared: what has to be uploaded was decided by asking that server what it already had.
+        A ``"Local Cache"`` one is a plain ``conan list`` output, so nothing in it is prepared and
+        everything is done here. Those are the only two shapes, half prepared lists are not
+        supported.
 
-            :param list_path: The path to the list file
-            :param remote: The remote that the package list contents are to be uploaded to
-            """
-
+        :param list_path: The path to the list file
+        :param remote: The remote that the package list contents are to be uploaded to
+        :return: a ``(package_list, is_prepared)`` tuple
+        """
         def _is_entry_prepared(entry):
-            """ An entry that a "conan upload --dry-run" already prepared: it carries the decision of
-            whether to upload it, and, when it is going to be, the urls that preparing computed.
+            """ An entry that a ``conan upload --dry-run`` already prepared: it carries the
+            decision of whether to upload it, and, when it is going to be, the urls that
+            preparing computed.
 
-            An entry the server already has needs nothing more: preparing compresses nothing for it, so it
-            gets no urls either, and requiring them would reject every list prepared for a remote that is
-            already up to date
+            An entry the server already has needs nothing more: preparing compresses nothing for
+            it, so it gets no urls either, and requiring them would reject every list prepared for
+            a remote that is already up to date
             """
             if "upload" not in entry:
                 return False
             return "upload-urls" in entry if entry["upload"] else True
+
         listfile = make_abs_path(list_path)
         multi_package_list = MultiPackagesList.load(listfile)
         names = list(multi_package_list.lists)
@@ -230,10 +239,10 @@ class UploadAPI:
         if len(names) == 1:
             if names[0] != remote.name:
                 raise ConanException(f"The package list '{listfile}' has entries for the remote "
-                                     f"'{names[0]}', but '{remote.name}' is the one being uploaded to.\n"
-                                     f"What has to be uploaded is decided against one specific remote, "
-                                     f"so prepare the list for '{remote.name}', or upload it to "
-                                     f"'{names[0]}'")
+                                     f"'{names[0]}', but '{remote.name}' is the one being uploaded "
+                                     f"to.\nWhat has to be uploaded is decided against one "
+                                     f"specific remote, so prepare the list for '{remote.name}', "
+                                     f"or upload it to '{names[0]}'")
 
             package_list = multi_package_list[remote.name]
             unprepared = [str(ref) for ref, packages in package_list.items()
@@ -244,10 +253,11 @@ class UploadAPI:
                 listed = ", ".join(unprepared[:5])
                 more = f" and {len(unprepared) - 5} more" if len(unprepared) > 5 else ""
                 raise ConanException(f"The package list '{listfile}' has entries for the remote "
-                                     f"'{remote.name}', so it is expected to be fully prepared, but these "
-                                     f"are not: {listed}{more}\nA half prepared list is not supported: "
-                                     f"either prepare it all with 'conan upload --dry-run', or pass a "
-                                     f"plain 'conan list' one to prepare and upload in one go")
+                                     f"'{remote.name}', so it is expected to be fully prepared, "
+                                     f"but these are not: {listed}{more}\nA half prepared list is "
+                                     f"not supported: either prepare it all with "
+                                     f"'conan upload --dry-run', or pass a plain 'conan list' one "
+                                     f"to prepare and upload in one go")
             return package_list, True
         if not names:
             raise ConanException(f"The package list '{listfile}' has no entries")
