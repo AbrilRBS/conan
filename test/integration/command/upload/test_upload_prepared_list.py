@@ -71,7 +71,7 @@ def test_dry_run_then_upload():
 
     c.run("upload * -r=default -c --dry-run --format=json", redirect_stdout="prepared.json")
     assert "Uploading recipe" not in c.out  # nothing is transferred by the dry run
-    c.run("list pkg/1.0:* -r=default", assert_error=True)
+    c.run("list pkg/1.0:* -r=default")
     assert "ERROR: Recipe not found" in c.out  # nothing reached the server yet
 
     c.run("upload -l prepared.json -r=default -c")
@@ -221,9 +221,12 @@ def test_prepared_list_of_what_is_already_in_the_server():
     assert "Uploading recipe" not in c.out
     assert "Uploading package" not in c.out
 
-    # Unless it is forced, and the forced list uploads too
+    # --force in the dry run is not carried by the list: the transfer re-asks the server what it
+    # has, so whether to upload anyway is a decision of that second run
     c.run("upload * -r=default -c --dry-run --force --format=json", redirect_stdout="forced.json")
     c.run("upload -l forced.json -r=default -c")
+    assert "Uploading recipe" not in c.out
+    c.run("upload -l forced.json -r=default -c --force")
     assert "pkg/1.0: Uploading recipe" in c.out
 
 
