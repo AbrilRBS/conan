@@ -6,7 +6,23 @@ from conan.cli.command import conan_command, OnceArgument
 from conan.cli.commands.list import print_list_json, print_serial
 from conan.cli.commands.upload import ask_confirm_upload
 from conan.errors import ConanException
-from conan.internal.api.upload import UPLOAD_PREPARED
+from conan.internal.api.upload import UPLOAD_PREPARED, find_unpreparable
+
+
+def _single_package_list(multi_package_list, listfile):
+    """ The one package list in the file. "conan list" keys its output by "Local Cache", and
+    "conan upload-prepare" keys its own by the remote name, so accept either rather than only the
+    first: re-preparing the output of a previous run has to work
+    """
+    names = list(multi_package_list.lists)
+    if "Local Cache" in names:
+        return multi_package_list["Local Cache"]
+    if len(names) == 1:
+        return multi_package_list[names[0]]
+    listed = ", ".join(f"'{n}'" for n in names) or "nothing"
+    raise ConanException(f"The package list '{listfile}' has entries for {listed}, so it is not "
+                         f"clear which ones to prepare. Split it, or use one produced by "
+                         f"'conan list' or a single 'conan upload-prepare'")
 
 
 def summary_prepare_list(results):
@@ -24,6 +40,7 @@ def summary_prepare_list(results):
                     v.pop("info", None)
                     v.pop("timestamp", None)
                     v.pop("files", None)
+                    v.pop("upload-urls", None)
                     v.pop(UPLOAD_PREPARED, None)
                     upload_value = v.pop("upload", None)
                     if upload_value is not None:
@@ -48,8 +65,8 @@ def upload_prepare(conan_api: ConanAPI, parser, *args):
     This is the first half of 'conan upload': it checks which revisions the remote already has,
     applies the recipes 'upload_policy', and compresses the artifacts, leaving them ready in the
     cache. The resulting package list, saved with '--format=json', is the input of
-    'conan upload-artifacts', which does the transfer. Its paths are relative to the cache
-    folder, so the two steps can run with the cache in different locations.
+    'conan upload-artifacts', which does the transfer. It holds absolute paths, so both
+    steps need to see the same cache.
 
     Preparing reads the recipes, and reading a recipe imports it, which executes its code. Split
     this way, that only happens here, and never in the step that holds the upload credentials.
@@ -101,12 +118,20 @@ def upload_prepare(conan_api: ConanAPI, parser, *args):
     if args.list:
         listfile = make_abs_path(args.list)
         multi_package_list = MultiPackagesList.load(listfile)
-        package_list = multi_package_list["Local Cache"]
+        package_list = _single_package_list(multi_package_list, args.list)
         if args.only_recipe:
             package_list.only_recipes()
     else:
         ref_pattern = ListPattern(args.pattern, package_id="*", only_recipe=args.only_recipe)
         package_list = conan_api.list.select(ref_pattern, package_query=args.package_query)
+
+    unpreparable = find_unpreparable(package_list)
+    if unpreparable:
+        listed = ", ".join(unpreparable[:5])
+        more = f" and {len(unpreparable) - 5} more" if len(unpreparable) > 5 else ""
+        ConanOutput().warning(f"{len(unpreparable)} entries have no revision, so they cannot be "
+                              f"prepared and will not be uploaded: {listed}{more}. Ask for "
+                              f"revisions in the query, like 'conan list \"pkg/1.0#*:*#*\"'")
 
     if package_list:
         # If only if search with "*" we ask for confirmation

@@ -1,6 +1,6 @@
 import json
 import os
-import shutil
+import platform
 import textwrap
 
 import pytest
@@ -36,15 +36,22 @@ def _server_has_sources(server):
 
 def _break_cache_recipes(client):
     """ Make every recipe in the cache raise as soon as its module is imported. Everything that
-    keeps working afterwards proves that no recipe was loaded """
+    keeps working afterwards proves that no recipe was loaded.
+
+    Only the exported "e/" copies are touched: the "d/" ones are what the prepared list points at,
+    and poisoning those would upload a corrupt recipe and make the test pass on its log lines
+    while publishing garbage
+    """
     broken = 0
     for root, _, files in os.walk(os.path.join(client.cache_folder, "p")):
+        if os.path.basename(root) != "e":
+            continue
         for f in files:
             if f == "conanfile.py":
                 path = os.path.join(root, f)
                 save(path, 'raise Exception("Recipe module executed!")\n' + load(path))
                 broken += 1
-    assert broken, "No recipes found in the cache to break"
+    assert broken, "No exported recipes found in the cache to break"
 
 
 def test_prepare_and_upload_artifacts():
@@ -106,6 +113,30 @@ def test_upload_artifacts_does_not_load_the_recipes():
     assert "pkg/1.0: Uploading recipe" in c.out
     assert "pkg/1.0: Uploading package" in c.out
     assert "pyreq/1.0: Uploading recipe" in c.out
+
+    # And what reached the server is usable, not the poisoned copy
+    c2 = TestClient(servers=c.servers, inputs=["admin", "password"], light=True)
+    c2.run("install --requires=pkg/1.0")
+    assert "pkg/1.0: Downloaded package revision" in c2.out
+
+
+def test_prepare_does_not_write_to_the_remote():
+    """ The other half of the split's claim: preparing only reads from the remotes, so it can be
+    given read-only credentials. Pinned here so that adding any write to it fails """
+    server = TestServer(read_permissions=[("*/*@*/*", "*")], write_permissions=[],
+                        users={"reader": "password"})
+    c = TestClient(servers={"default": server}, inputs=4 * ["reader", "password"], light=True)
+    c.run("remote login default reader -p password")
+    c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
+    c.run("create .")
+
+    c.run('upload-prepare "*" -r=default -c --format=json', redirect_stdout="pkglist.json")
+    assert "Upload prepared in" in c.out
+    assert "Permission denied" not in c.out
+
+    # And the transfer is the step that needs write access, so it is the one that is refused
+    c.run("upload-artifacts -l pkglist.json -r=default", assert_error=True)
+    assert "Permission denied" in c.out
 
 
 def test_prepare_applies_the_upload_policy():
@@ -186,7 +217,7 @@ def test_upload_artifacts_plain_list():
     c.save({"plain.json": plain})
 
     c.run("upload-artifacts -l plain.json -r=default", assert_error=True)
-    assert "is a plain package list, it has not been prepared for upload" in c.out
+    assert "were not prepared for upload" in c.out
     # And it says exactly how to fix it, that same file is valid input for upload-prepare
     assert "conan upload-prepare -l plain.json -r=default --format=json > prepared.json" in c.out
     assert "conan upload-artifacts -l prepared.json -r=default" in c.out
@@ -201,27 +232,32 @@ def test_upload_artifacts_list_from_conan_upload():
     c.run("upload * -r=default -c --format=json", redirect_stdout="uploaded.json")
 
     c.run("upload-artifacts -l uploaded.json -r=default", assert_error=True)
-    assert "looks like the output of 'conan upload', not of 'conan upload-prepare'" in c.out
+    assert "were not prepared for upload" in c.out
+    assert "pkg/1.0#" in c.out  # and it names them
 
 
 def test_upload_artifacts_partially_prepared_list():
-    """ 'conan pkglist merge' can mix a prepared list with one that is not, and uploading that
-    would silently leave the unprepared half out """
+    """ One single reference, prepared, with the mark removed from one of its package revisions.
+    The count of unprepared entries then reaches the count of references, which used to take the
+    wrong branch and report the whole list as never prepared without naming anything """
     c = _client()
-    c.save({"conanfile.py": GenConanfile()})
-    c.run("create . --name=liba --version=1.0")
-    c.run("create . --name=libb --version=1.0")
-    c.run("upload-prepare liba/1.0 -r=default -c --format=json", redirect_stdout="prep.json")
-    c.run("list libb/1.0:* --format=json", redirect_stdout="plain.json")
-    c.save({"plain.json": c.load("plain.json").replace('"Local Cache"', '"default"', 1)})
-    c.run("pkglist merge -l prep.json -l plain.json --format=json", redirect_stdout="mix.json")
+    c.save({"conanfile.py": GenConanfile("pkg", "1.0").with_settings("os")})
+    c.run("create . -s os=Linux")
+    c.run("create . -s os=Windows")
+    c.run('upload-prepare "pkg/1.0:*" -r=default -c --format=json', redirect_stdout="prep.json")
+
+    pkglist = json.loads(c.load("prep.json"))
+    rrev = next(iter(pkglist["default"]["pkg/1.0"]["revisions"].values()))
+    unmarked = sorted(rrev["packages"])[0]
+    for prev in rrev["packages"][unmarked]["revisions"].values():
+        prev.pop("upload-prepared")
+    c.save({"mix.json": json.dumps(pkglist)})
 
     c.run("upload-artifacts -l mix.json -r=default", assert_error=True)
-    assert "is only partly prepared for upload, these entries were not" in c.out
-    assert "libb/1.0" in c.out
-    assert "liba/1.0" not in c.out.split("these entries were not")[1]
+    assert "1 entries of the package list 'mix.json' were not prepared for upload" in c.out
+    assert unmarked in c.out  # and it names the one that was not
     c.run("list *:* -r=default")
-    assert "liba/1.0" not in c.out  # nothing was uploaded, not even the prepared half
+    assert "pkg/1.0" not in c.out  # nothing was uploaded, not even the prepared part
 
 
 def test_merge_two_prepared_lists():
@@ -273,9 +309,12 @@ def test_prepare_and_upload_artifacts_parallel(parallel):
         c.run(f"create . --name=lib{index} --version=1.0")
 
     c.run('upload-prepare "*" -r=default -c --format=json', redirect_stdout="pkglist.json")
+    assert (f"Preparing with {parallel} parallel threads" in c.out) is (parallel > 1)
     c.run("upload-artifacts -l pkglist.json -r=default")
+    assert (f"Uploading with {parallel} parallel threads" in c.out) is (parallel > 1)
     for index in range(2):
         assert f"lib{index}/1.0: Uploading recipe" in c.out
+        assert f"lib{index}/1.0: Uploading package" in c.out
 
 
 def test_prepare_from_a_package_list():
@@ -291,51 +330,46 @@ def test_prepare_from_a_package_list():
     assert "pkg/1.0: Uploading recipe" in c.out
 
 
-def test_prepared_paths_are_cache_relative():
-    c = _client()
-    c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
-    c.run("create .")
-    c.run('upload-prepare "*" -r=default -c --format=json', redirect_stdout="pkglist.json")
-
-    content = c.load("pkglist.json")
-    assert c.cache_folder not in content  # no absolute path leaked
-    pkglist = json.loads(content)
-    rrev = next(iter(pkglist["default"]["pkg/1.0"]["revisions"].values()))
-    prev = next(iter(next(iter(rrev["packages"].values()))["revisions"].values()))
-    for files in (rrev["files"], prev["files"]):
-        for path in files.values():
-            assert not os.path.isabs(path)
-            assert "\\" not in path  # always "/", the list can travel between platforms
+def _revisions(pkglist, remote="default"):
+    """ Every recipe revision and package revision dict of a serialized package list """
+    for ref_dict in pkglist[remote].values():
+        for rrev_dict in ref_dict.get("revisions", {}).values():
+            yield rrev_dict
+            for pkg_dict in rrev_dict.get("packages", {}).values():
+                yield from pkg_dict.get("revisions", {}).values()
 
 
-def test_upload_artifacts_with_the_cache_in_another_location():
-    """ The prepared list is resolved against the local cache, so the transfer can run in a
-    different machine or container, as long as it has the same cache contents """
+def test_upload_artifacts_returns_the_same_as_conan_upload():
+    """ Both commands share the same formatters, and the prepared list holds absolute paths just
+    like 'conan upload' does, so what they return is the same except for the preparation mark.
+    This used to differ: 'upload-artifacts' emitted cache relative paths and 'upload' absolute
+    ones, silently changing the shape for anything consuming '--format=json' """
     c = _client()
     c.save({"conanfile.py": GenConanfile("pkg", "1.0").with_package_file("f.txt", "content")})
     c.run("create .")
-    c.run('upload-prepare "*" -r=default -c --format=json', redirect_stdout="pkglist.json")
 
-    # A second client, with the very same cache contents but in a different folder
-    moved_cache = os.path.join(temp_folder(), "moved", ".conan2")
-    shutil.copytree(c.cache_folder, moved_cache)
-    c2 = TestClient(cache_folder=moved_cache, servers=c.servers, inputs=["admin", "password"],
-                    light=True)
-    assert c2.cache_folder != c.cache_folder
-    c2.save({"pkglist.json": c.load("pkglist.json")})
+    c.run("upload * -r=default -c --format=json", redirect_stdout="whole.json")
+    whole = json.loads(c.load("whole.json"))
 
-    c2.run("upload-artifacts -l pkglist.json -r=default")
-    assert "pkg/1.0: Uploading recipe" in c2.out
-    assert "pkg/1.0: Uploading package" in c2.out
+    # Clear the server so the two step flow really transfers, and do the very same thing again
+    c.run("remove pkg/1.0 -r=default -c")
+    c.run("upload-prepare * -r=default -c --format=json", redirect_stdout="prep.json")
+    c.run("upload-artifacts -l prep.json -r=default --format=json", redirect_stdout="split.json")
+    split = json.loads(c.load("split.json"))
 
-    c3 = TestClient(servers=c.servers, inputs=["admin", "password"], light=True)
-    c3.run("install --requires=pkg/1.0")
-    assert "pkg/1.0: Downloaded package revision" in c3.out
+    # The preparation mark is the one intended difference, and only the split flow carries it
+    assert not any("upload-prepared" in r for r in _revisions(whole))
+    marks = [r.pop("upload-prepared", None) for r in _revisions(split)]
+    assert marks and all(m == {"format": 1, "remote": "default",
+                               "url": c.servers["default"].fake_url} for m in marks)
+
+    assert split == whole
 
 
-def test_upload_artifacts_rejects_paths_outside_the_cache():
-    """ The package list is a file, and whoever runs this step holds the upload credentials, so
-    it must not be able to make it upload anything outside of the cache """
+def test_prepared_paths_are_absolute():
+    """ The prepared list points at the artifacts with absolute paths, so it has to be used
+    against the cache that produced it. Same trust model as any other package list Conan reads
+    from a file """
     c = _client()
     c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
     c.run("create .")
@@ -343,15 +377,102 @@ def test_upload_artifacts_rejects_paths_outside_the_cache():
 
     pkglist = json.loads(c.load("pkglist.json"))
     rrev = next(iter(pkglist["default"]["pkg/1.0"]["revisions"].values()))
-    rrev["files"]["conanfile.py"] = "../../../secret.txt"
-    c.save({"tampered.json": json.dumps(pkglist)})
+    prev = next(iter(next(iter(rrev["packages"].values()))["revisions"].values()))
+    for files in (rrev["files"], prev["files"]):
+        assert files
+        for path in files.values():
+            assert os.path.isabs(path)
+            assert os.path.isfile(path)  # and they are really there, in this cache
 
-    c.run("upload-artifacts -l tampered.json -r=default", assert_error=True)
-    assert "is outside of the Conan cache" in c.out
-    assert "refusing to upload it" in c.out
+
+def test_prepared_list_records_the_remote_it_was_prepared_for():
+    """ Names are not enough: the same remote name can be repointed at another server between
+    preparing and uploading, and what has to be uploaded is decided against one server """
+    servers = {f"server{i}": TestServer([("*/*@*/*", "*")], [("*/*@*/*", "*")],
+                                       users={"user": "password"}) for i in range(2)}
+    c = TestClient(servers=servers, inputs=8 * ["user", "password"], light=True)
+    for name in servers:
+        c.run(f"remote login {name} user -p password")
+    c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
+    c.run("create .")
+    c.run("upload-prepare pkg/1.0 -r=server0 -c --format=json", redirect_stdout="p.json")
+    c.run("upload-artifacts -l p.json -r=server0")  # everything goes to server0
+    assert "pkg/1.0: Uploading recipe" in c.out
+
+    # Prepared again for server0, which now has it, so every entry is marked as not to upload
+    c.run("upload-prepare pkg/1.0 -r=server0 -c --format=json", redirect_stdout="p2.json")
+    # Repoint 'server0' at the other, empty server. Uploading the same list must not claim success
+    c.run("remote remove server1")  # free its url, remotes cannot share one
+    c.run(f'remote update server0 --url="{c.servers["server1"].fake_url}"')
+    c.run("upload-artifacts -l p2.json -r=server0", assert_error=True)
+    assert "was prepared for 'server0'" in c.out
+    assert "it is being uploaded to 'server0'" in c.out
+    assert "has to be prepared again" in c.out
 
 
-@pytest.mark.parametrize("kind", ["symlinked_folder", "empty_folder", "regular_file"])
+def test_upload_artifacts_rejects_entries_for_other_remotes():
+    """ Merging a prepared list with a plain one produces a document with two top level keys;
+    uploading only the prepared one would silently leave the rest out """
+    c = _client()
+    c.save({"conanfile.py": GenConanfile()})
+    c.run("create . --name=liba --version=1.0")
+    c.run("create . --name=libb --version=1.0")
+    c.run("upload-prepare liba/1.0 -r=default -c --format=json", redirect_stdout="prep.json")
+    c.run('list "libb/1.0#*:*#*" --format=json', redirect_stdout="plain.json")
+    c.run("pkglist merge -l prep.json -l plain.json --format=json", redirect_stdout="mix.json")
+
+    c.run("upload-artifacts -l mix.json -r=default", assert_error=True)
+    assert "has entries for 'Local Cache'" in c.out
+    assert "would silently leave those out" in c.out
+    c.run("list *:* -r=default")
+    assert "liba/1.0" not in c.out  # not even the prepared half was uploaded
+
+
+def test_upload_artifacts_error_entry_in_the_list():
+    """ A "conan list" against an unreachable remote records an error instead of packages """
+    c = _client()
+    c.save({"bad.json": '{"default": {"error": "Could not reach the remote"}}'})
+    c.run("upload-artifacts -l bad.json -r=default", assert_error=True)
+    assert "holds an error for the remote 'default' instead of packages" in c.out
+    assert "Traceback" not in c.out
+
+
+def test_prepare_warns_about_entries_without_revisions():
+    """ A coarse "conan list" query reports no revisions, and those entries can neither be
+    prepared nor uploaded. Warn instead of dropping them silently """
+    c = _client()
+    c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
+    c.run("create .")
+    c.run('list "pkg*" --format=json', redirect_stdout="coarse.json")
+
+    c.run("upload-prepare -l coarse.json -r=default --format=json", redirect_stdout="prep.json")
+    assert "have no revision, so they cannot be prepared and will not be uploaded" in c.out
+    assert "pkg/1.0" in c.out
+
+
+def test_prepare_accepts_its_own_output_again():
+    """ The advice printed when a list is not prepared says to run 'upload-prepare -l' on it, so
+    that has to work for a list keyed by a remote name, not only by "Local Cache" """
+    c = _client()
+    c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
+    c.run("create .")
+    c.run('list "pkg/1.0#*:*#*" --format=json', redirect_stdout="plain.json")
+    c.save({"renamed.json": c.load("plain.json").replace('"Local Cache"', '"default"', 1)})
+
+    # This is the exact remediation the error advertises, run verbatim
+    c.run("upload-artifacts -l renamed.json -r=default", assert_error=True)
+    assert "conan upload-prepare -l renamed.json -r=default --format=json > prepared.json" in c.out
+    c.run("upload-prepare -l renamed.json -r=default --format=json",
+          redirect_stdout="prepared.json")
+    c.run("upload-artifacts -l prepared.json -r=default")
+    assert "pkg/1.0: Uploading recipe" in c.out
+
+
+@pytest.mark.parametrize("kind", [
+    pytest.param("symlinked_folder",
+                 marks=pytest.mark.skipif(platform.system() == "Windows",
+                                          reason="symlink need admin privileges")),
+    "empty_folder", "regular_file"])
 def test_prepare_retrieves_exports_sources_between_remotes(kind):
     """ Recipes installed from one remote and uploaded to a different one need their exported
     sources fetched first, and that has to happen while preparing, which is the step allowed to

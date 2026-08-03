@@ -5,8 +5,7 @@ from typing import List
 
 from conan.api.model import PackagesList, Remote
 from conan.api.output import ConanOutput
-from conan.internal.api.upload import (add_urls, make_files_absolute, make_files_relative,
-                                       mark_prepared)
+from conan.internal.api.upload import add_urls, mark_prepared
 from conan.internal.api.uploader import PackagePreparator, UploadExecutor, UploadUpstreamChecker
 from conan.internal.rest.pkg_sign import PkgSignaturesPlugin
 from conan.internal.rest.file_uploader import FileUploader
@@ -102,9 +101,10 @@ class UploadAPI:
         checks integrity, checks the upload policy of the recipes, checks which revisions already
         exist in the server, and compresses the artifacts.
 
-        The resulting ``package_list`` records which artifacts have to be uploaded and where they
-        are in the cache, with paths relative to the cache folder, so it can be serialized and
-        handed over to ``upload_artifacts()``, even in a different machine or container.
+        The resulting ``package_list`` records which artifacts have to be uploaded, which remote
+        they were prepared for, and where they are in the cache, so it can be serialized and handed
+        over to ``upload_artifacts()``. The artifact paths in it are absolute, so both steps need
+        to see the same cache in the same location.
 
         This is the half of the upload that reads the recipes, and reading a recipe means
         importing it, which executes its code. Splitting it out lets it run somewhere that does
@@ -143,8 +143,7 @@ class UploadAPI:
         ConanOutput().title(f"Preparing upload to remote {remote.name}")
         self._parallel_pkglists(package_list, _prepare_pkglist,
                                 "Preparing with {parallel} parallel threads")
-        mark_prepared(package_list)
-        make_files_relative(package_list, self._conan_api.cache_folder)
+        mark_prepared(package_list, remote)
         elapsed = time.time() - t
         ConanOutput().success(f"Upload prepared in {int(elapsed)}s\n")
 
@@ -157,16 +156,15 @@ class UploadAPI:
         can run in a machine that holds the credentials for the server without exposing them to
         arbitrary recipe code.
 
-        :param package_list: A PackagesList object as left by ``prepare_full()``, with the paths
-            of the artifacts relative to the cache folder, which are resolved against this
-            cache. Paths pointing outside of the cache are rejected. Preparing it against a
-            different remote than ``remote`` is not valid, the decisions it records about what
-            has to be uploaded are specific to one remote.
+        :param package_list: A PackagesList object as left by ``prepare_full()``. Its artifact
+            paths are absolute, so it has to be used against the same cache that prepared it.
+            Like every other package list Conan reads from a file, it is trusted input: the
+            artifacts it points at are uploaded as they are. Preparing it against a different
+            remote than ``remote`` is not valid, the decisions it records about what has to be
+            uploaded are specific to one server.
         :param remote: The remote to upload the artifacts to.
         :param dry_run: If ``True``, it will not perform the actual upload.
         """
-        make_files_absolute(package_list, self._conan_api.cache_folder)
-
         def _upload_pkglist(pkglist, subtitle=lambda _: None):
             if not dry_run:
                 subtitle("Uploading artifacts")
@@ -181,8 +179,6 @@ class UploadAPI:
         elapsed = time.time() - t
         ConanOutput().success(f"Upload completed in {int(elapsed)}s\n")
         add_urls(package_list, remote)
-        # Leave the list as it was received, the paths of this workflow are cache relative
-        make_files_relative(package_list, self._conan_api.cache_folder)
 
     def upload_full(self, package_list: PackagesList, remote: Remote, enabled_remotes: List[Remote],
                     check_integrity=False, force=False, metadata: List[str] = None, dry_run=False):

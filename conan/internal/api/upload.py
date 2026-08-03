@@ -1,25 +1,27 @@
-import os
-
-from conan.errors import ConanException
 from conan.internal.rest.client_routes import ClientV2Router
 from conan.internal.util.files import sha1sum
 
 
 # Mark that "conan upload-prepare" leaves on everything it prepares, so that
-# "conan upload-artifacts" can tell a prepared list from any other package list. It goes in every
-# revision, and not once for the whole document, because that is the granularity at which package
-# lists are merged, and because the pkglist formatters treat every top level key as a remote name
-# and every key below it as a reference
+# "conan upload-artifacts" can tell a prepared list from any other package list, and can tell that
+# it is being uploaded to the remote it was prepared against. It goes in every revision, and not
+# once for the whole document, because that is the granularity at which package lists are merged,
+# and because the pkglist formatters treat every top level key as a remote name and every key
+# below it as a reference.
+# This is a usability guard, not a security control: it lives in the file, so it can be forged
 UPLOAD_PREPARED = "upload-prepared"
 UPLOAD_PREPARED_FORMAT = 1
 
 
-def mark_prepared(package_list):
-    """ Mark every entry of the package list as prepared for upload """
-    for ref, packages in package_list.items():
-        package_list.recipe_dict(ref)[UPLOAD_PREPARED] = UPLOAD_PREPARED_FORMAT
-        for pref in packages:
-            package_list.package_dict(pref)[UPLOAD_PREPARED] = UPLOAD_PREPARED_FORMAT
+def mark_prepared(package_list, remote):
+    """ Mark every entry of the package list as prepared for upload to ``remote`` """
+    mark = {"format": UPLOAD_PREPARED_FORMAT, "remote": remote.name, "url": remote.url}
+    for ref, ref_dict in package_list._data.items():  # noqa, items() can skip entries, see below
+        for rrev_dict in ref_dict.get("revisions", {}).values():
+            rrev_dict[UPLOAD_PREPARED] = mark
+            for pkg_dict in rrev_dict.get("packages", {}).values():
+                for prev_dict in pkg_dict.get("revisions", {}).values():
+                    prev_dict[UPLOAD_PREPARED] = mark
 
 
 def find_unprepared(package_list):
@@ -27,18 +29,16 @@ def find_unprepared(package_list):
 
     This walks the raw data instead of iterating the package list, because ``items()`` silently
     skips the references that have no recipe revision, and merging a plain package list into a
-    prepared one is precisely how those appear.
+    prepared one is precisely how those appear. ``mark_prepared()`` walks it the same way, so the
+    two always agree on which entries exist.
 
-    Package entries without a package revision are not reported: they are invisible to every
-    upload path, prepared or not, "conan upload" ignores them just the same
+    Entries without a revision are not reported: they are invisible to every upload path,
+    prepared or not, "conan upload" ignores them just the same. "conan upload-prepare" warns
+    about the ones it was given, see ``find_unpreparable()``
     """
     unprepared = []
     for ref, ref_dict in package_list._data.items():  # noqa, no iteration can skip entries here
-        revisions = ref_dict.get("revisions")
-        if not revisions:
-            unprepared.append(ref)
-            continue
-        for rrev, rrev_dict in revisions.items():
+        for rrev, rrev_dict in ref_dict.get("revisions", {}).items():
             if UPLOAD_PREPARED not in rrev_dict:
                 unprepared.append(f"{ref}#{rrev}")
                 continue
@@ -49,46 +49,39 @@ def find_unprepared(package_list):
     return unprepared
 
 
-def _convert_files(package_list, convert):
-    for ref, packages in package_list.items():
-        ref_info = package_list.recipe_dict(ref)
-        if ref_info.get("files"):
-            ref_info["files"] = {f: convert(fp) for f, fp in ref_info["files"].items()}
-        for pref in packages:
-            pref_info = package_list.package_dict(pref)
-            if pref_info.get("files"):
-                pref_info["files"] = {f: convert(fp) for f, fp in pref_info["files"].items()}
-
-
-def make_files_relative(package_list, cache_folder):
-    """ Turn the absolute paths of the artifacts into paths relative to the cache folder, always
-    with "/" separators, so that a serialized package list can be consumed in another machine or
-    container, where the cache is not necessarily in the same location
+def find_unpreparable(package_list):
+    """ The entries of an input package list that cannot be prepared, nor uploaded, because they
+    carry no revision. A "conan list" query only reports revisions when it is asked for them,
+    like ``conan list "pkg/1.0#*:*#*"``, so a coarser query produces these
     """
-    cache_folder = os.path.abspath(cache_folder)
+    unpreparable = []
+    for ref, ref_dict in package_list._data.items():  # noqa
+        revisions = ref_dict.get("revisions")
+        if not revisions:
+            unpreparable.append(ref)
+            continue
+        for rrev, rrev_dict in revisions.items():
+            for pkg_id, pkg_dict in rrev_dict.get("packages", {}).items():
+                if not pkg_dict.get("revisions"):
+                    unpreparable.append(f"{ref}#{rrev}:{pkg_id}")
+    return unpreparable
 
-    def _relative(path):
-        return os.path.relpath(path, cache_folder).replace("\\", "/")
 
-    _convert_files(package_list, _relative)
+def find_prepared_for_other_remote(package_list, remote):
+    """ The remotes, other than ``remote``, that entries of this package list were prepared for.
 
-
-def make_files_absolute(package_list, cache_folder):
-    """ Resolve the cache relative paths of the artifacts against this cache folder.
-
-    The paths are not allowed to escape the cache: they come from a file, and whoever runs the
-    upload of those artifacts is typically the one holding the credentials for the server
+    What has to be uploaded is decided against one specific server, so a list prepared elsewhere
+    would upload the wrong things. Names are not enough: the same name can be repointed at a
+    different server between preparing and uploading
     """
-    cache_folder = os.path.abspath(cache_folder)
-
-    def _absolute(path):
-        full_path = os.path.abspath(os.path.join(cache_folder, path.replace("/", os.sep)))
-        if os.path.commonpath([full_path, cache_folder]) != cache_folder:
-            raise ConanException(f"Path '{path}' in the package list is outside of the Conan "
-                                 f"cache '{cache_folder}', refusing to upload it")
-        return full_path
-
-    _convert_files(package_list, _absolute)
+    others = set()
+    for ref_dict in package_list._data.values():  # noqa
+        for rrev_dict in ref_dict.get("revisions", {}).values():
+            mark = rrev_dict.get(UPLOAD_PREPARED)
+            if isinstance(mark, dict) and \
+                    (mark.get("remote"), mark.get("url")) != (remote.name, remote.url):
+                others.add(f"'{mark.get('remote')}' ({mark.get('url')})")
+    return sorted(others)
 
 
 def add_urls(package_list, remote):
