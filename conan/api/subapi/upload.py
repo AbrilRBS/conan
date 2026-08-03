@@ -3,8 +3,6 @@ import time
 from multiprocessing.pool import ThreadPool
 from typing import List
 
-from packaging.metadata import Metadata
-
 from conan.api.model import PackagesList, Remote, MultiPackagesList
 from conan.api.output import ConanOutput
 from conan.cli import make_abs_path
@@ -194,7 +192,8 @@ class UploadAPI:
 
         output.success("Upload backup sources complete\n")
 
-    def get_pkglist_to_upload(self, list_path, remote: Remote):
+    @staticmethod
+    def get_pkglist_to_upload(list_path: str, remote: Remote):
         """ The package list to work with, out of a package list file, and whether it is already
             prepared.
 
