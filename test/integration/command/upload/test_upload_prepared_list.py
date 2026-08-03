@@ -274,6 +274,30 @@ def test_prepared_list_of_what_is_already_in_the_server():
     assert "pkg/1.0: Uploading recipe" in c.out
 
 
+def test_prepared_list_with_only_some_entries_to_upload():
+    """ The usual incremental case: the recipe and one binary are already in the server, a second
+    binary is new. The dry run marks the first two as not to upload, and preparing computes nothing
+    for them, so they carry no urls. They still count as prepared, there is nothing to prepare """
+    c = _client()
+    c.save({"conanfile.py": GenConanfile("pkg", "1.0").with_settings("os")})
+    c.run("create . -s os=Linux")
+    c.run("upload * -r=default -c")
+    c.run("create . -s os=Windows")  # same recipe revision, a new binary
+
+    c.run('upload "*:*" -r=default -c --dry-run --format=json', redirect_stdout="prepared.json")
+    rrev = next(iter(json.loads(c.load("prepared.json"))["default"]["pkg/1.0"]["revisions"]
+                     .values()))
+    assert rrev["upload"] is False and "upload-urls" not in rrev  # nothing to do for the recipe
+    prevs = [next(iter(p["revisions"].values())) for p in rrev["packages"].values()]
+    assert sorted(p["upload"] for p in prevs) == [False, True]
+    assert [p for p in prevs if p["upload"]][0]["upload-urls"]  # only the new one has urls
+
+    # The list is accepted, and only what was missing is transferred
+    c.run("upload -l prepared.json -r=default -c")
+    assert "Uploading recipe" not in c.out
+    assert c.out.count("Uploading package") == 1
+
+
 def test_dry_run_only_recipe():
     c = _client()
     c.save({"conanfile.py": GenConanfile("pkg", "1.0")})

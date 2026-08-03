@@ -1,70 +1,10 @@
 from conan.api.conan_api import ConanAPI
 from conan.api.model import ListPattern, MultiPackagesList, PackagesList
 from conan.api.output import ConanOutput
-from conan.cli import make_abs_path
 from conan.cli.command import conan_command, OnceArgument
 from conan.cli.commands.list import print_list_json, print_serial
 from conan.api.input import UserInput
 from conan.errors import ConanException
-
-
-def _is_entry_prepared(entry):
-    """ An entry that a "conan upload --dry-run" already prepared: it carries the decision of
-    whether to upload it, and, when it is going to be, the urls that preparing computed.
-
-    An entry the server already has needs nothing more: preparing compresses nothing for it, so it
-    gets no urls either, and requiring them would reject every list prepared for a remote that is
-    already up to date
-    """
-    if "upload" not in entry:
-        return False
-    return "upload-urls" in entry if entry["upload"] else True
-
-
-def _package_list_from_file(multi_package_list, listfile, remote):
-    """ The package list to work with, out of a package list file, and whether it is already
-    prepared.
-
-    "conan list" keys its output by "Local Cache", or by the name of the remote it queried, and
-    "conan upload" keys its own by the remote it uploaded to. That last one matters: the output of
-    a "conan upload --dry-run" is meant to be fed back here, so that the artifacts it already
-    prepared are uploaded without preparing them again.
-
-    A list keyed by a remote has to be uploaded to that same remote, and has to be fully prepared:
-    what has to be uploaded was decided by asking that server what it already had. A "Local Cache"
-    one is a plain "conan list" output, so nothing in it is prepared and everything is done here.
-    Those are the only two shapes, half prepared lists are not supported
-    """
-    names = list(multi_package_list.lists)
-    if "Local Cache" in names:
-        return multi_package_list["Local Cache"], False
-    if len(names) == 1:
-        if names[0] != remote:
-            raise ConanException(f"The package list '{listfile}' has entries for the remote "
-                                 f"'{names[0]}', but '{remote}' is the one being uploaded to.\n"
-                                 f"What has to be uploaded is decided against one specific remote, "
-                                 f"so prepare the list for '{remote}', or upload it to "
-                                 f"'{names[0]}'")
-
-        package_list = multi_package_list[remote]
-        unprepared = [str(ref) for ref, packages in package_list.items()
-                      if not _is_entry_prepared(package_list.recipe_dict(ref))
-                      or not all(_is_entry_prepared(package_list.package_dict(pref))
-                                 for pref in packages)]
-        if unprepared:
-            listed = ", ".join(unprepared[:5])
-            more = f" and {len(unprepared) - 5} more" if len(unprepared) > 5 else ""
-            raise ConanException(f"The package list '{listfile}' has entries for the remote "
-                                 f"'{remote}', so it is expected to be fully prepared, but these "
-                                 f"are not: {listed}{more}\nA half prepared list is not supported: "
-                                 f"either prepare it all with 'conan upload --dry-run', or pass a "
-                                 f"plain 'conan list' one to prepare and upload in one go")
-        return package_list, True
-    if not names:
-        raise ConanException(f"The package list '{listfile}' has no entries")
-    listed = ", ".join(f"'{n}'" for n in names)
-    raise ConanException(f"The package list '{listfile}' has entries for {listed}, so it is not "
-                         f"clear which ones to upload. Pass a list holding a single set of them")
 
 
 def summary_upload_list(results):
@@ -153,10 +93,7 @@ def upload(conan_api: ConanAPI, parser, *args):
     is_prepared = False
 
     if args.list:
-        listfile = make_abs_path(args.list)
-        multi_package_list = MultiPackagesList.load(listfile)
-        package_list, is_prepared = _package_list_from_file(multi_package_list, args.list,
-                                                            args.remote)
+        package_list, is_prepared = conan_api.upload.get_pkglist_to_upload(args.list, args.remote)
         if args.only_recipe:
             package_list.only_recipes()
     else:
