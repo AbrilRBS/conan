@@ -124,14 +124,10 @@ def test_upload_of_a_prepared_list_does_not_load_the_recipes():
     assert "pkg/1.0: Downloaded package revision" in c2.out
 
 
-def test_upload_of_a_half_prepared_list():
-    """ A package list can hold both: entries a dry run already prepared, and entries that came
-    from somewhere else, like 'conan list'. The prepared ones are uploaded as they are, the rest
-    are prepared and uploaded in the same run.
-
-    Which is which is proved by poisoning only the prepared one's recipe: it must not be read,
-    while the unprepared one's has to be, to prepare it
-    """
+def test_half_prepared_list_is_rejected():
+    """ Only two shapes are supported: a plain "conan list" output, which is prepared and uploaded
+    here, or a list keyed by a remote, which has to be fully prepared already. A merge of the two
+    is neither, and uploading it would silently leave the unprepared half out """
     c = _client()
     c.save({"conanfile.py": GenConanfile()})
     c.run("create . --name=liba --version=1.0")
@@ -139,33 +135,83 @@ def test_upload_of_a_half_prepared_list():
 
     c.run("upload liba/1.0 -r=default -c --dry-run --format=json", redirect_stdout="prep.json")
     c.run('list "libb/1.0#*:*#*" --format=json', redirect_stdout="plain.json")
-    # Both in the same set, which is what a half prepared list is
+    # Put both in the same set, which is what a half prepared list is
     c.save({"plain.json": c.load("plain.json").replace('"Local Cache"', '"default"', 1)})
     c.run("pkglist merge -l prep.json -l plain.json --format=json", redirect_stdout="mixed.json")
 
-    mixed = json.loads(c.load("mixed.json"))
-    prepared = {ref: ("upload-urls" in next(iter(d["revisions"].values())))
-                for ref, d in mixed["default"].items()}
-    assert prepared == {"liba/1.0": True, "libb/1.0": False}
-
-    # liba is prepared, so uploading must not read it. libb is not, so it has to be read
-    _break_recipe(c, "liba/1.0")
-
-    c.run("upload -l mixed.json -r=default -c")
-    assert "Recipe module executed!" not in c.out
-    assert "liba/1.0: Uploading recipe" in c.out
-    assert "libb/1.0: Uploading recipe" in c.out
-    assert "libb/1.0:" in c.out and "Compressing conan_package.tgz" in c.out  # libb was prepared
-
+    c.run("upload -l mixed.json -r=default -c", assert_error=True)
+    assert "is expected to be fully prepared, but these are not: libb/1.0" in c.out
+    assert "A half prepared list is not supported" in c.out
+    assert "Traceback" not in c.out
     c.run("list *:* -r=default")
-    assert "liba/1.0" in c.out
-    assert "libb/1.0" in c.out
+    assert "liba/1.0" not in c.out  # and nothing was uploaded, not even the prepared half
 
-    # Both are complete in the server
-    c2 = TestClient(servers=c.servers, inputs=["admin", "password"], light=True)
-    c2.run("install --requires=liba/1.0")
-    c2.run("install --requires=libb/1.0")
-    assert "libb/1.0: Downloaded package revision" in c2.out
+
+def test_upstream_is_not_re_checked_for_a_prepared_list():
+    """ A prepared list is taken at its word: the server is not asked again about it. So whoever
+    got there between the dry run and the upload is not noticed, and the artifacts are pushed over
+    theirs. This is the race the split buys, and it is a deliberate trade, not an oversight """
+    c = _client()
+    c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
+    c.run("create .")
+    c.run("upload * -r=default -c --dry-run --format=json", redirect_stdout="prepared.json")
+    assert "Checking which revisions exist in the remote server" in c.out
+
+    # Someone else uploads that very revision in the meantime
+    other = TestClient(servers=c.servers, inputs=2 * ["admin", "password"], light=True)
+    other.save({"conanfile.py": GenConanfile("pkg", "1.0")})
+    other.run("create .")
+    other.run("upload * -r=default -c")
+    assert "pkg/1.0: Uploading recipe" in other.out
+
+    # The prepared upload does not ask the server anything, so it does not find out
+    c.run("upload -l prepared.json -r=default -c")
+    assert "Checking which revisions exist in the remote server" not in c.out
+    assert "already in server, skipping upload" not in c.out
+    assert "pkg/1.0: Uploading recipe" in c.out  # pushed over what was already there
+
+    # Whereas a single-step upload would have noticed and skipped
+    c.run("upload * -r=default -c")
+    assert "already in server, skipping upload" in c.out
+    assert "Uploading recipe" not in c.out
+
+
+def test_prepared_list_must_match_the_remote():
+    """ A prepared list is keyed by the remote it was prepared against, and what has to be
+    uploaded was decided by asking that server what it already had. Uploading it somewhere else
+    would upload the wrong things, so it is refused """
+    c = _two_servers_client()
+    c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
+    c.run("create .")
+    c.run("upload * -r=server0 -c --dry-run --format=json", redirect_stdout="p0.json")
+    assert list(json.loads(c.load("p0.json"))) == ["server0"]
+
+    c.run("upload -l p0.json -r=server1 -c", assert_error=True)
+    assert "has entries for the remote 'server0', but 'server1' is the one being uploaded to" \
+           in c.out
+    assert "prepare the list for 'server1', or upload it to 'server0'" in c.out
+    assert "Traceback" not in c.out  # a user mistake, not an internal error
+    c.run("list *:* -r=server1")
+    assert "pkg/1.0" not in c.out  # and nothing was uploaded anywhere
+
+    # The remote it was prepared for is of course accepted
+    c.run("upload -l p0.json -r=server0 -c")
+    assert "pkg/1.0: Uploading recipe" in c.out
+
+
+def test_plain_list_is_not_tied_to_a_remote():
+    """ A 'conan list' output is keyed "Local Cache" and says nothing about any remote, so it can
+    be uploaded to whichever one is asked for """
+    c = _two_servers_client()
+    c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
+    c.run("create .")
+    c.run('list "pkg/1.0#*:*#*" --format=json', redirect_stdout="plain.json")
+    assert list(json.loads(c.load("plain.json"))) == ["Local Cache"]
+
+    c.run("upload -l plain.json -r=server1 -c")
+    assert "pkg/1.0: Uploading recipe" in c.out
+    c.run("upload -l plain.json -r=server0 -c")
+    assert "pkg/1.0: Uploading recipe" in c.out
 
 
 def test_dry_run_applies_the_upload_policy():
@@ -221,12 +267,10 @@ def test_prepared_list_of_what_is_already_in_the_server():
     assert "Uploading recipe" not in c.out
     assert "Uploading package" not in c.out
 
-    # --force in the dry run is not carried by the list: the transfer re-asks the server what it
-    # has, so whether to upload anyway is a decision of that second run
+    # --force belongs to the dry run: it decides what the list says, and the upload obeys it
+    # without asking the server again
     c.run("upload * -r=default -c --dry-run --force --format=json", redirect_stdout="forced.json")
     c.run("upload -l forced.json -r=default -c")
-    assert "Uploading recipe" not in c.out
-    c.run("upload -l forced.json -r=default -c --force")
     assert "pkg/1.0: Uploading recipe" in c.out
 
 
