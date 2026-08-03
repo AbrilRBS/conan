@@ -10,9 +10,9 @@ from conan.internal.api.upload import UPLOAD_PREPARED, find_unpreparable
 
 
 def _single_package_list(multi_package_list, listfile):
-    """ The one package list in the file. "conan list" keys its output by "Local Cache", and
-    "conan upload-prepare" keys its own by the remote name, so accept either rather than only the
-    first: re-preparing the output of a previous run has to work
+    """ The one package list in the file. "conan list" keys its output by "Local Cache" and
+    "conan upload-prepare" keys its own by the remote name, so accept either: preparing an already
+    prepared list is how it is re-targeted at another remote, and it has to work
     """
     names = list(multi_package_list.lists)
     if "Local Cache" in names:
@@ -20,9 +20,10 @@ def _single_package_list(multi_package_list, listfile):
     if len(names) == 1:
         return multi_package_list[names[0]]
     listed = ", ".join(f"'{n}'" for n in names) or "nothing"
-    raise ConanException(f"The package list '{listfile}' has entries for {listed}, so it is not "
-                         f"clear which ones to prepare. Split it, or use one produced by "
-                         f"'conan list' or a single 'conan upload-prepare'")
+    raise ConanException(f"The package list '{listfile}' has entries for {listed}, and preparing "
+                         f"is done for one remote at a time.\nPass a list holding a single set of "
+                         f"entries: what 'conan list' writes, or what one 'conan upload-prepare' "
+                         f"run writes")
 
 
 def summary_prepare_list(results):
@@ -96,7 +97,10 @@ def upload_prepare(conan_api: ConanAPI, parser, *args):
                         help='Prepare all matching recipes without confirmation')
     parser.add_argument('--allow-disabled', default=False, action='store_true',
                         help='Allow preparing for a disabled remote')
-    parser.add_argument("-l", "--list", help="Package list file")
+    parser.add_argument("-l", "--list",
+                        help="Package list file. The output of a previous 'conan upload-prepare' "
+                             "is accepted too, and preparing it again re-targets it at the remote "
+                             "given here")
     parser.add_argument("-m", "--metadata", action='append',
                         help='Prepare the metadata, even if the package is already in the server '
                              'and not uploaded')
@@ -129,9 +133,11 @@ def upload_prepare(conan_api: ConanAPI, parser, *args):
     if unpreparable:
         listed = ", ".join(unpreparable[:5])
         more = f" and {len(unpreparable) - 5} more" if len(unpreparable) > 5 else ""
-        ConanOutput().warning(f"{len(unpreparable)} entries have no revision, so they cannot be "
-                              f"prepared and will not be uploaded: {listed}{more}. Ask for "
-                              f"revisions in the query, like 'conan list \"pkg/1.0#*:*#*\"'")
+        count = ("1 entry has" if len(unpreparable) == 1
+                 else f"{len(unpreparable)} entries have")
+        ConanOutput().warning(f"{count} no revision and will not be prepared nor uploaded: "
+                              f"{listed}{more}. Ask for revisions in the query, like "
+                              f"'conan list \"pkg/1.0#*:*#*\"'")
 
     if package_list:
         # If only if search with "*" we ask for confirmation

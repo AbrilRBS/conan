@@ -8,7 +8,6 @@ import pytest
 from conan.api.model import RecipeReference
 from conan.internal.util.files import load, save
 from conan.test.assets.genconanfile import GenConanfile
-from conan.test.utils.test_files import temp_folder
 from conan.test.utils.tools import TestClient, TestServer
 
 
@@ -52,6 +51,15 @@ def _break_cache_recipes(client):
                 save(path, 'raise Exception("Recipe module executed!")\n' + load(path))
                 broken += 1
     assert broken, "No exported recipes found in the cache to break"
+
+
+def _revisions(pkglist, remote="default"):
+    """ Every recipe revision and package revision dict of a serialized package list """
+    for ref_dict in pkglist[remote].values():
+        for rrev_dict in ref_dict.get("revisions", {}).values():
+            yield rrev_dict
+            for pkg_dict in rrev_dict.get("packages", {}).values():
+                yield from pkg_dict.get("revisions", {}).values()
 
 
 def test_prepare_and_upload_artifacts():
@@ -195,7 +203,7 @@ def test_upload_artifacts_prepared_for_another_remote():
     """ What has to be uploaded is decided against one specific remote, using the result for a
     different one would upload the wrong things """
     c = _client()
-    c.run("remote add other fake://other", assert_error=False)
+    c.run("remote add other fake://other")
     c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
     c.run("create .")
     c.run('upload-prepare "*" -r=default -c --format=json', redirect_stdout="pkglist.json")
@@ -217,22 +225,22 @@ def test_upload_artifacts_plain_list():
     c.save({"plain.json": plain})
 
     c.run("upload-artifacts -l plain.json -r=default", assert_error=True)
-    assert "were not prepared for upload" in c.out
+    assert "not prepared for upload" in c.out
     # And it says exactly how to fix it, that same file is valid input for upload-prepare
     assert "conan upload-prepare -l plain.json -r=default --format=json > prepared.json" in c.out
     assert "conan upload-artifacts -l prepared.json -r=default" in c.out
 
 
 def test_upload_artifacts_list_from_conan_upload():
-    """ The output of 'conan upload' carries upload decisions but was not prepared by
-    'conan upload-prepare', and the error says so instead of talking about plain lists """
+    """ The output of 'conan upload' does carry upload decisions and compressed files, so it is
+    the preparation mark, and not the presence of those, that decides whether a list is usable """
     c = _client()
     c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
     c.run("create .")
     c.run("upload * -r=default -c --format=json", redirect_stdout="uploaded.json")
 
     c.run("upload-artifacts -l uploaded.json -r=default", assert_error=True)
-    assert "were not prepared for upload" in c.out
+    assert "not prepared for upload" in c.out
     assert "pkg/1.0#" in c.out  # and it names them
 
 
@@ -254,7 +262,7 @@ def test_upload_artifacts_partially_prepared_list():
     c.save({"mix.json": json.dumps(pkglist)})
 
     c.run("upload-artifacts -l mix.json -r=default", assert_error=True)
-    assert "1 entries of the package list 'mix.json' were not prepared for upload" in c.out
+    assert "1 entry of the package list 'mix.json' was not prepared for upload" in c.out
     assert unmarked in c.out  # and it names the one that was not
     c.run("list *:* -r=default")
     assert "pkg/1.0" not in c.out  # nothing was uploaded, not even the prepared part
@@ -330,15 +338,6 @@ def test_prepare_from_a_package_list():
     assert "pkg/1.0: Uploading recipe" in c.out
 
 
-def _revisions(pkglist, remote="default"):
-    """ Every recipe revision and package revision dict of a serialized package list """
-    for ref_dict in pkglist[remote].values():
-        for rrev_dict in ref_dict.get("revisions", {}).values():
-            yield rrev_dict
-            for pkg_dict in rrev_dict.get("packages", {}).values():
-                yield from pkg_dict.get("revisions", {}).values()
-
-
 def test_upload_artifacts_returns_the_same_as_conan_upload():
     """ Both commands share the same formatters, and the prepared list holds absolute paths just
     like 'conan upload' does, so what they return is the same except for the preparation mark.
@@ -353,7 +352,7 @@ def test_upload_artifacts_returns_the_same_as_conan_upload():
 
     # Clear the server so the two step flow really transfers, and do the very same thing again
     c.run("remove pkg/1.0 -r=default -c")
-    c.run("upload-prepare * -r=default -c --format=json", redirect_stdout="prep.json")
+    c.run('upload-prepare "*" -r=default -c --format=json', redirect_stdout="prep.json")
     c.run("upload-artifacts -l prep.json -r=default --format=json", redirect_stdout="split.json")
     split = json.loads(c.load("split.json"))
 
@@ -388,11 +387,7 @@ def test_prepared_paths_are_absolute():
 def test_prepared_list_records_the_remote_it_was_prepared_for():
     """ Names are not enough: the same remote name can be repointed at another server between
     preparing and uploading, and what has to be uploaded is decided against one server """
-    servers = {f"server{i}": TestServer([("*/*@*/*", "*")], [("*/*@*/*", "*")],
-                                       users={"user": "password"}) for i in range(2)}
-    c = TestClient(servers=servers, inputs=8 * ["user", "password"], light=True)
-    for name in servers:
-        c.run(f"remote login {name} user -p password")
+    c = _two_servers_client()
     c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
     c.run("create .")
     c.run("upload-prepare pkg/1.0 -r=server0 -c --format=json", redirect_stdout="p.json")
@@ -446,7 +441,7 @@ def test_prepare_warns_about_entries_without_revisions():
     c.run('list "pkg*" --format=json', redirect_stdout="coarse.json")
 
     c.run("upload-prepare -l coarse.json -r=default --format=json", redirect_stdout="prep.json")
-    assert "have no revision, so they cannot be prepared and will not be uploaded" in c.out
+    assert "no revision and will not be prepared nor uploaded" in c.out
     assert "pkg/1.0" in c.out
 
 
@@ -466,6 +461,33 @@ def test_prepare_accepts_its_own_output_again():
           redirect_stdout="prepared.json")
     c.run("upload-artifacts -l prepared.json -r=default")
     assert "pkg/1.0: Uploading recipe" in c.out
+
+
+def test_prepare_retargets_an_already_prepared_list():
+    """ Preparing an already prepared list is how it is pointed at another remote: what has to be
+    uploaded is asked of the new server, and the mark moves with it """
+    c = _two_servers_client()
+    c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
+    c.run("create .")
+    c.run("upload-prepare pkg/1.0 -r=server0 -c --format=json", redirect_stdout="p0.json")
+    c.run("upload-artifacts -l p0.json -r=server0")
+    assert "pkg/1.0: Uploading recipe" in c.out
+
+    # Re-targeted at the other server, which does not have it yet
+    c.run("upload-prepare -l p0.json -r=server1 --format=json", redirect_stdout="p1.json")
+    pkglist = json.loads(c.load("p1.json"))
+    assert list(pkglist) == ["server1"]
+    rrev = next(iter(pkglist["server1"]["pkg/1.0"]["revisions"].values()))
+    assert rrev["upload-prepared"] == {"format": 1, "remote": "server1",
+                                       "url": c.servers["server1"].fake_url}
+    assert rrev["upload"] is True  # asked of server1, not carried over from server0
+    assert "upload-urls" not in c.load("p1.json")  # and the ones for server0 are gone
+
+    c.run("upload-artifacts -l p1.json -r=server1")
+    assert "pkg/1.0: Uploading recipe" in c.out
+    # The list is only valid for the remote it was last prepared for
+    c.run("upload-artifacts -l p1.json -r=server0", assert_error=True)
+    assert "was not prepared for the remote 'server0', but for 'server1'" in c.out
 
 
 @pytest.mark.parametrize("kind", [

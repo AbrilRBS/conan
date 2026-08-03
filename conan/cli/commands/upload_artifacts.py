@@ -42,8 +42,10 @@ def _check_prepared(package_list, listfile, remote):
     if unprepared:
         listed = "\n".join(f"\t{u}" for u in unprepared[:10])
         more = f"\n\t... and {len(unprepared) - 10} more" if len(unprepared) > 10 else ""
+        count = "1 entry" if len(unprepared) == 1 else f"{len(unprepared)} entries"
+        was = "was" if len(unprepared) == 1 else "were"
         raise ConanException(
-            f"{len(unprepared)} entries of the package list '{listfile}' were not prepared for "
+            f"{count} of the package list '{listfile}' {was} not prepared for "
             f"upload:\n{listed}{more}\n"
             f"Uploading it would silently leave them out. Prepare them and upload the result:\n"
             f"\tconan upload-prepare -l {listfile} -r={remote.name} --format=json > prepared.json\n"
