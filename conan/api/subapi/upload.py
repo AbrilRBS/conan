@@ -6,7 +6,8 @@ from typing import List
 from conan.api.model import PackagesList, Remote
 from conan.api.output import ConanOutput
 from conan.internal.api.upload import add_urls
-from conan.internal.api.uploader import PackagePreparator, UploadExecutor, UploadUpstreamChecker
+from conan.internal.api.uploader import PackagePreparator, UploadExecutor, UploadUpstreamChecker, \
+    is_ref_prepared
 from conan.internal.rest.pkg_sign import PkgSignaturesPlugin
 from conan.internal.rest.file_uploader import FileUploader
 from conan.internal.errors import AuthenticationException, ForbiddenException
@@ -37,13 +38,15 @@ class UploadAPI:
         """
         loader = self._api_helpers.loader
         for ref, _ in package_list.items():
-            layout = self._api_helpers.cache.recipe_layout(ref)
-            conanfile_path = layout.conanfile()
-            conanfile = loader.load_basic(conanfile_path, remotes=enabled_remotes)
-            if conanfile.upload_policy == "skip":
-                ConanOutput().info(f"{ref}: Skipping upload of binaries, "
-                                   "because upload_policy='skip'")
-                package_list.recipe_dict(ref)["packages"] = {}
+            bundle = package_list.recipe_dict(ref)
+            if not is_ref_prepared(bundle):
+                layout = self._api_helpers.cache.recipe_layout(ref)
+                conanfile_path = layout.conanfile()
+                conanfile = loader.load_basic(conanfile_path, remotes=enabled_remotes)
+                if conanfile.upload_policy == "skip":
+                    ConanOutput().info(f"{ref}: Skipping upload of binaries, "
+                                       "because upload_policy='skip'")
+                    bundle["packages"] = {}
 
         UploadUpstreamChecker(self._api_helpers.remote_manager).check(package_list, remote, force)
 

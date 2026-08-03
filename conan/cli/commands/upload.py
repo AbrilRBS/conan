@@ -8,6 +8,26 @@ from conan.api.input import UserInput
 from conan.errors import ConanException
 
 
+def _package_list_from_file(multi_package_list, listfile):
+    """ The package list to work with, out of a package list file.
+
+    "conan list" keys its output by "Local Cache", or by the name of the remote it queried, and
+    "conan upload" keys its own by the remote it uploaded to. That last one matters: the output of
+    a "conan upload --dry-run" is meant to be fed back here, so that the artifacts it already
+    prepared are uploaded without preparing them again
+    """
+    names = list(multi_package_list.lists)
+    if "Local Cache" in names:
+        return multi_package_list["Local Cache"]
+    if len(names) == 1:
+        return multi_package_list[names[0]]
+    if not names:
+        raise ConanException(f"The package list '{listfile}' has no entries")
+    listed = ", ".join(f"'{n}'" for n in names)
+    raise ConanException(f"The package list '{listfile}' has entries for {listed}, so it is not "
+                         f"clear which ones to upload. Pass a list holding a single set of them")
+
+
 def summary_upload_list(results):
     """ Do a little format modification to serialized
     package list, so it looks prettier on text output
@@ -94,7 +114,7 @@ def upload(conan_api: ConanAPI, parser, *args):
     if args.list:
         listfile = make_abs_path(args.list)
         multi_package_list = MultiPackagesList.load(listfile)
-        package_list = multi_package_list["Local Cache"]
+        package_list = _package_list_from_file(multi_package_list, args.list)
         if args.only_recipe:
             package_list.only_recipes()
     else:

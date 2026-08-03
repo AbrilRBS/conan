@@ -117,37 +117,39 @@ class PackagePreparator:
     def prepare(self, pkg_list, enabled_remotes, metadata, force=False):
         local_url = self._global_conf.get("core.scm:local_url", choices=["allow", "block"])
         for ref, packages in pkg_list.items():
-            recipe_layout = self._cache.recipe_layout(ref)
-            conanfile_path = recipe_layout.conanfile()
-            conanfile = self._loader.load_basic(conanfile_path)
-            url = conanfile.conan_data.get("scm", {}).get("url") if conanfile.conan_data else None
-            if local_url != "allow" and url is not None:
-                if not any(url.startswith(v) for v in ("ssh", "git", "http", "file")):
-                    raise ConanException(f"Package {ref} contains conandata scm url={url}\n"
-                                         "This isn't a remote URL, the build won't be reproducible\n"
-                                         "Failing because conf 'core.scm:local_url!=allow'")
-
-            # Just in case it was defined from a previous run
             bundle = pkg_list.recipe_dict(ref)
-            bundle.pop("files", None)
-            bundle.pop("upload-urls", None)
-            if bundle.get("upload") or force:
-                self._prepare_recipe(recipe_layout, ref, bundle, conanfile, enabled_remotes)
+            if not is_ref_prepared(bundle):
+                recipe_layout = self._cache.recipe_layout(ref)
+                conanfile_path = recipe_layout.conanfile()
+                conanfile = self._loader.load_basic(conanfile_path)
+                url = conanfile.conan_data.get("scm", {}).get("url") if conanfile.conan_data else None
+                if local_url != "allow" and url is not None:
+                    if not any(url.startswith(v) for v in ("ssh", "git", "http", "file")):
+                        raise ConanException(f"Package {ref} contains conandata scm url={url}\n"
+                                             "This isn't a remote URL, the build won't be reproducible\n"
+                                             "Failing because conf 'core.scm:local_url!=allow'")
 
-            # Package metadata files too
-            if metadata != [""] and (metadata or bundle.get("upload")):
-                metadata_folder = recipe_layout.metadata()
-                files = _metadata_files(metadata_folder, metadata)
-                if files:
-                    ConanOutput(scope=str(ref)).info(f"Recipe metadata: {len(files)} files")
-                    bundle.setdefault("files", {}).update(files)
-                    bundle["upload"] = True
+                # Just in case it was defined from a previous run
+                bundle.pop("files", None)
+                bundle.pop("upload-urls", None)
+                if bundle.get("upload") or force:
+                    self._prepare_recipe(recipe_layout, ref, bundle, conanfile, enabled_remotes)
+
+                # Package metadata files too
+                if metadata != [""] and (metadata or bundle.get("upload")):
+                    metadata_folder = recipe_layout.metadata()
+                    files = _metadata_files(metadata_folder, metadata)
+                    if files:
+                        ConanOutput(scope=str(ref)).info(f"Recipe metadata: {len(files)} files")
+                        bundle.setdefault("files", {}).update(files)
+                        bundle["upload"] = True
 
             for pref in packages:
                 prev_bundle = pkg_list.package_dict(pref)
-                prev_bundle.pop("files", None)  # If defined from a previous upload
-                prev_bundle.pop("upload-urls", None)
-                self._prepare_package(pref, prev_bundle, metadata, force=force)
+                if not is_ref_prepared(prev_bundle):
+                    prev_bundle.pop("files", None)  # If defined from a previous upload
+                    prev_bundle.pop("upload-urls", None)
+                    self._prepare_package(pref, prev_bundle, metadata, force=force)
 
     def _prepare_recipe(self, recipe_layout, ref, ref_bundle, conanfile, remotes):
         """ do a bunch of things that are necessary before actually executing the upload:
@@ -389,3 +391,7 @@ def _metadata_files(folder, metadata):
             path = os.path.join("metadata", relpath).replace("\\", "/")
             result[path] = abs_path
     return result
+
+
+def is_ref_prepared(ref_dict):
+    return "upload" in ref_dict and "upload-urls" in ref_dict
