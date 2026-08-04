@@ -19,7 +19,7 @@ from conan.test.assets.genconanfile import GenConanfile
 from conan.test.utils.tools import TestClient, TestServer
 
 
-def _client():
+def _client() -> TestClient:
     """ A client already authenticated, so the several commands each test runs don't have to
     consume the interactive credentials """
     c = TestClient(default_server_user=True, light=True)
@@ -220,12 +220,13 @@ def test_dry_run_applies_the_upload_policy():
     c.save({"conanfile.py": GenConanfile("pkg", "1.0")
            .with_class_attribute('upload_policy = "skip"')})
     c.run("create .")
+    created_layout = c.created_layout()
 
     c.run("upload * -r=default -c --dry-run --format=json", redirect_stdout="prepared.json")
     assert "pkg/1.0: Skipping upload of binaries, because upload_policy='skip'" in c.out
     pkglist = json.loads(c.load("prepared.json"))
-    rrev = next(iter(pkglist["default"]["pkg/1.0"]["revisions"].values()))
-    assert rrev["packages"] == {}
+    rrev_bundle = pkglist["default"]["pkg/1.0"]["revisions"][created_layout.reference.ref.revision]
+    assert rrev_bundle["packages"] == {}
 
     _break_all_recipes(c)  # the policy is in the list now, no recipe has to be read again
     c.run("upload -l prepared.json -r=default -c")
@@ -283,12 +284,15 @@ def test_prepared_list_with_only_some_entries_to_upload():
     c.run("create . -s os=Linux")
     c.run("upload * -r=default -c")
     c.run("create . -s os=Windows")  # same recipe revision, a new binary
+    created_layout = c.created_layout()
 
     c.run('upload "*:*" -r=default -c --dry-run --format=json', redirect_stdout="prepared.json")
-    rrev = next(iter(json.loads(c.load("prepared.json"))["default"]["pkg/1.0"]["revisions"]
-                     .values()))
-    assert rrev["upload"] is False and "upload-urls" not in rrev  # nothing to do for the recipe
-    prevs = [next(iter(p["revisions"].values())) for p in rrev["packages"].values()]
+
+    pkglist = json.loads(c.load("prepared.json"))
+    rrev_bundle = pkglist["default"]["pkg/1.0"]["revisions"][created_layout.reference.ref.revision]
+    assert rrev_bundle["upload"] is False and "upload-urls" not in rrev_bundle  # nothing to do for the recipe
+
+    prevs = [next(iter(p["revisions"].values())) for p in rrev_bundle["packages"].values()]
     assert sorted(p["upload"] for p in prevs) == [False, True]
     assert [p for p in prevs if p["upload"]][0]["upload-urls"]  # only the new one has urls
 
@@ -318,9 +322,12 @@ def test_dry_run_metadata():
     save(metadata, "log contents")
 
     c.run("upload * -r=default -c --dry-run --format=json", redirect_stdout="prepared.json")
+    prepared = c.load("prepared.json")
+    assert "metadata/logs/mylog.txt" in prepared
     assert "Recipe metadata: 1 files" in c.out
-    c.run("upload -l prepared.json -r=default -c")
+    c.run("upload -l prepared.json -r=default -c -vvv")
     assert "pkg/1.0: Uploading recipe" in c.out
+    assert "metadata/logs/mylog.txt" in c.out
 
 
 @pytest.mark.parametrize("parallel", [1, 2])
@@ -346,12 +353,13 @@ def test_prepared_paths_are_absolute():
     c = _client()
     c.save({"conanfile.py": GenConanfile("pkg", "1.0")})
     c.run("create .")
+    created_layout = c.created_layout()
     c.run("upload * -r=default -c --dry-run --format=json", redirect_stdout="prepared.json")
 
     pkglist = json.loads(c.load("prepared.json"))
-    rrev = next(iter(pkglist["default"]["pkg/1.0"]["revisions"].values()))
-    prev = next(iter(next(iter(rrev["packages"].values()))["revisions"].values()))
-    for files in (rrev["files"], prev["files"]):
+    rrev_bundle = pkglist["default"]["pkg/1.0"]["revisions"][created_layout.reference.ref.revision]
+    prev_bundle = rrev_bundle["packages"][created_layout.reference.package_id]["revisions"][created_layout.reference.revision]
+    for files in (rrev_bundle["files"], prev_bundle["files"]):
         assert files
         for path in files.values():
             assert os.path.isabs(path)
