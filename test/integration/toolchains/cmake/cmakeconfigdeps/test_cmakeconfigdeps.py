@@ -766,6 +766,115 @@ class TestLinkFeatures:
         # The requirement should have the link feature info
         assert "# Requirement dep::dep -> pkg::compA (Full link: True)\n# Link feature: MYFET" in targets
 
+    def test_link_only_global_cpp_info(self):
+        # A cross-package require with headers=False (and the default libs=True) must still
+        # link (so it stays visible to a consumer's $<TARGET_RUNTIME_DLLS:...>), but wrapped in
+        # $<LINK_ONLY:...> so its usage requirements (include dirs, defines...) don't propagate.
+        tc = TestClient()
+        tc.save({"conanfile.py": GenConanfile("pkg", "1.0")})
+        tc.run("create")
+
+        dep = textwrap.dedent("""
+        from conan import ConanFile
+        class Dep(ConanFile):
+            name = "dep"
+            version = "1.0"
+            settings = "os", "compiler", "build_type", "arch"
+
+            def requirements(self):
+                self.requires("pkg/1.0", headers=False)
+        """)
+        tc.save({"conanfile.py": dep})
+        tc.run("create")
+        tc.run("install --requires=dep/1.0 -g CMakeConfigDeps")
+        targets = tc.load("dep-Targets-release.cmake")
+        assert "# Requirement dep::dep -> pkg::pkg (Full link: True)\n# Link only: True" in targets
+        assert '"$<LINK_ONLY:$<$<CONFIG:RELEASE>:pkg::pkg>>")' in targets
+
+    def test_link_only_lib_to_component_require(self):
+        tc = TestClient()
+        conanfile = textwrap.dedent("""
+        from conan import ConanFile
+
+        class Pkg(ConanFile):
+            name = "pkg"
+            version = "1.0"
+            settings = "os", "compiler", "build_type", "arch"
+
+            def package_info(self):
+                # Just declaring the component is enough for it to exist as a requirable target
+                self.cpp_info.components["compA"]
+        """)
+        tc.save({"conanfile.py": conanfile})
+        tc.run("create")
+
+        dep = textwrap.dedent("""
+        from conan import ConanFile
+        class Dep(ConanFile):
+            name = "dep"
+            version = "1.0"
+            settings = "os", "compiler", "build_type", "arch"
+
+            def requirements(self):
+                self.requires("pkg/1.0", headers=False)
+
+            def package_info(self):
+                self.cpp_info.requires = ["pkg::compA"]
+        """)
+        tc.save({"conanfile.py": dep})
+        tc.run("create")
+        tc.run("install --requires=dep/1.0 -g CMakeConfigDeps")
+        targets = tc.load("dep-Targets-release.cmake")
+        assert "# Requirement dep::dep -> pkg::compA (Full link: True)\n# Link only: True" in targets
+        assert '"$<LINK_ONLY:$<$<CONFIG:RELEASE>:pkg::compA>>")' in targets
+
+    def test_link_only_and_link_feature_combined(self):
+        """
+        https://github.com/conan-io/conan/issues/19802 discusses adding a genuine LINK_ONLY
+        codegen path (as opposed to always fully linking or COMPILE_ONLY). "link_only" and
+        "link_feature" are orthogonal: one controls usage-requirement propagation, the other
+        decorates the linker command line. Both must be able to apply at once, nested, instead
+        of one silently overriding the other.
+        """
+        tc = TestClient()
+        conanfile = textwrap.dedent("""
+        from conan import ConanFile
+
+        class Pkg(ConanFile):
+            name = "pkg"
+            version = "1.0"
+            settings = "os", "compiler", "build_type", "arch"
+
+            def package_info(self):
+                self.cpp_info.components["compA"].set_property("cmake_link_feature", "MYFET")
+        """)
+        tc.save({"conanfile.py": conanfile})
+        tc.run("create")
+
+        dep = textwrap.dedent("""
+        from conan import ConanFile
+        class Dep(ConanFile):
+            name = "dep"
+            version = "1.0"
+            settings = "os", "compiler", "build_type", "arch"
+
+            def requirements(self):
+                self.requires("pkg/1.0", headers=False)
+
+            def package_info(self):
+                self.cpp_info.requires = ["pkg::compA"]
+        """)
+        tc.save({"conanfile.py": dep})
+        tc.run("create")
+        tc.run("install --requires=dep/1.0 -g CMakeConfigDeps")
+        targets = tc.load("dep-Targets-release.cmake")
+        assert ("# Requirement dep::dep -> pkg::compA (Full link: True)\n"
+                "# Link feature: MYFET") in targets
+        assert "# Link only: True" in targets
+        # LINK_ONLY must wrap LINK_LIBRARY (not replace it): the feature still decorates the
+        # link line, and usage requirements still don't propagate - both apply simultaneously.
+        assert '"$<LINK_ONLY:$<LINK_LIBRARY:MYFET,$<$<CONFIG:RELEASE>:pkg::compA>>>")' in targets
+
 
 class TestLegacyVariables:
     def test_legacy_defines(self):

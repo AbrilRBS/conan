@@ -135,13 +135,31 @@ class TargetConfigurationTemplate2:
             message(FATAL_ERROR "The 'CMakeConfigDeps' generator LINK_FEATURE property only works with CMake >= 3.24")
         endif()
         {% endif %}
+        {% if link_info.get("link_only") %}
+        # Link only: True (usage requirements like include dirs/defines are not propagated)
+        {% endif %}
+        {#
+          "link_feature" ($<LINK_LIBRARY:...>) and "link_only" ($<LINK_ONLY:...>) are orthogonal
+          generator expressions: one decorates how the linker treats the library, the other
+          controls whether its usage requirements (include dirs, defines...) propagate to
+          consumers. They compose by nesting: CMake evaluates $<LINK_ONLY:$<LINK_LIBRARY:F,T>>
+          (and the reverse nesting) correctly, still applying F at link time while T's usage
+          requirements still don't propagate - verified empirically against CMake >= 3.24 with
+          both nesting orders (see the discussion in the PR that introduced this comment).
+          Build the expression incrementally instead of an if/elif that picks one: both
+          properties can be set on the same requirement at the same time, and both must apply.
+          DO NOT collapse this back into an if/elif/else.
+        #}
+        {% set target_expr = config_wrapper(config, require_target) %}
+        {% if link_info["link_feature"] %}
+        {% set target_expr = "$<LINK_LIBRARY:" + link_info["link_feature"] + "," + target_expr + ">" %}
+        {% endif %}
+        {% if link_info.get("link_only") %}
+        {% set target_expr = "$<LINK_ONLY:" + target_expr + ">" %}
+        {% endif %}
         # set property allows to append, and lib_info[requires] will iterate
         set_property(TARGET {{lib}} APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-            {% if link_info["link_feature"] %}
-                     "$<LINK_LIBRARY:{{link_info["link_feature"]}},{{config_wrapper(config, require_target)}}>")
-            {% else %}
-                     "{{config_wrapper(config, require_target)}}")
-            {% endif %}
+                     "{{target_expr}}")
         {% else %}
         if(CMAKE_VERSION VERSION_LESS "3.27")
             message(FATAL_ERROR "The 'CMakeConfigDeps' generator COMPILE_ONLY expression only works with CMake >= 3.27")

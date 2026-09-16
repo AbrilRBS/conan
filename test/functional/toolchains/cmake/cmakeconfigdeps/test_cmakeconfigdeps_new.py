@@ -1,3 +1,4 @@
+import glob
 import os
 import platform
 import re
@@ -504,6 +505,105 @@ class TestLibsLinkageTraits:
         test_generators_folder = os.path.join("test_package", test_build_folder, "generators")
         libs_targets = tc.load(os.path.join(test_generators_folder, "lib-Targets-release.cmake"))
         assert '"$<LINK_LIBRARY:MYFET,$<$<CONFIG:RELEASE>:matrix::matrix>>"' in libs_targets
+
+
+@pytest.mark.skipif(platform.system() != "Windows", reason="TARGET_RUNTIME_DLLS and the "
+                     "IMPORTED_IMPLIB (.lib) it depends on are only meaningful on Windows")
+@pytest.mark.tool("cmake")  # minimum version that provides TARGET_RUNTIME_DLLS
+class TestLinkOnlyRuntimeDlls:
+    def test_link_only_transitive_dll_discovered_by_target_runtime_dlls(self):
+        """
+        https://github.com/conan-io/conan/issues/19802
+
+        Graph: app -> engine -> plugin (all shared). ``engine`` requires ``plugin`` with
+        ``headers=False`` (the default ``libs=True`` still applies), so CMakeConfigDeps emits
+        the requirement as ``$<LINK_ONLY:plugin::plugin>`` instead of a plain link: plugin is
+        still a real link dependency of engine (and, transitively, of app), but its usage
+        requirements (include dirs) don't propagate.
+
+        ``engine`` never includes plugin.h and never calls into plugin - the requirement exists
+        purely so plugin's shared library is co-located with app at runtime (e.g. because
+        something dlopen's/LoadLibrary's it), which is exactly the scenario that motivated this
+        feature: a component whose .dll should be discoverable via
+        ``$<TARGET_RUNTIME_DLLS:...>`` without being otherwise propagated.
+
+        This builds a real Windows shared library (plugin.dll + plugin.lib, i.e. Conan's
+        cpp_info.location / cpp_info.link_location - IMPORTED_LOCATION / IMPORTED_IMPLIB -
+        the Windows-only property pair discussed in the design, since only Windows shared libs
+        have a separate import library at all) and proves, on the file system, that plugin.dll
+        - which "app" never directly requires or links - still gets copied next to app.exe by
+        a $<TARGET_RUNTIME_DLLS:app> custom command. If LINK_ONLY had instead been implemented
+        (or had regressed) as "don't link at all" (like COMPILE_ONLY), plugin would never reach
+        app's link graph and this file would not exist.
+        """
+        c = TestClient()
+
+        # plugin: shared lib. Nothing calls it - it only needs to exist as a real link/runtime
+        # dependency for the LINK_ONLY mechanism (and TARGET_RUNTIME_DLLS) to have something to
+        # discover.
+        c.run("new cmake_lib -d name=plugin -d version=0.1")
+        c.run(f"create . -o '*:shared=True' -c tools.cmake.cmakedeps:new={new_value} -tf=")
+
+        # engine: requires plugin/0.1 with headers=False. Strip the template's auto-generated
+        # '#include "plugin.h"' + call: engine must never touch plugin's header (that's the
+        # point of headers=False), only require its presence.
+        c.save({}, clean_first=True)
+        c.run("new cmake_lib -d name=engine -d version=0.1 -d requires=plugin/0.1")
+        conanfile = c.load("conanfile.py").replace(
+            'self.requires("plugin/0.1")', 'self.requires("plugin/0.1", headers=False)')
+        c.save({"conanfile.py": conanfile})
+        engine_cpp = c.load("src/engine.cpp") \
+            .replace('#include "plugin.h"\n', "") \
+            .replace("plugin();\n", "")
+        c.save({"src/engine.cpp": engine_cpp})
+        c.run(f"create . -o '*:shared=True' -c tools.cmake.cmakedeps:new={new_value} -tf=")
+
+        # app: only requires/links engine. Never mentions plugin at all.
+        c.save({}, clean_first=True)
+        c.run("new cmake_exe -d name=app -d version=0.1 -d requires=engine/0.1")
+        cmakelists = c.load("CMakeLists.txt")
+        cmakelists += textwrap.dedent("""
+            if(WIN32)
+              add_custom_command(TARGET app POST_BUILD
+                  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                          "$<TARGET_RUNTIME_DLLS:app>" "$<TARGET_FILE_DIR:app>"
+                  COMMAND_EXPAND_LISTS
+              )
+            endif()
+            """)
+        c.save({"CMakeLists.txt": cmakelists})
+        c.run(f"build . -o '*:shared=True' -c tools.cmake.cmakedeps:new={new_value}")
+
+        build_folder = os.path.join(c.current_folder, "build")
+        exes = glob.glob(os.path.join(build_folder, "**", "app.exe"), recursive=True)
+        assert len(exes) == 1, f"Expected exactly one app.exe under {build_folder}, found {exes}"
+        app_dir = os.path.dirname(exes[0])
+
+        # The load-bearing assertion: plugin.dll was never directly required by app, only by
+        # engine (with headers=False/link_only) - it must still show up in
+        # $<TARGET_RUNTIME_DLLS:app> and get copied next to app.exe.
+        assert os.path.isfile(os.path.join(app_dir, "plugin.dll")), (
+            f"plugin.dll not found next to app.exe in {app_dir}: LINK_ONLY should still make "
+            f"plugin a real (if usage-requirement-silent) link dependency, discoverable by "
+            f"TARGET_RUNTIME_DLLS. Contents: {os.listdir(app_dir)}")
+        # engine.dll is a normal, fully-linked dependency - expected to be there regardless,
+        # kept as a control/sanity check.
+        assert os.path.isfile(os.path.join(app_dir, "engine.dll"))
+
+        # Sanity check that nothing else broke: app still runs fine.
+        c.run_command(f'"{exes[0]}"')
+        assert "app/0.1" in c.out
+
+        # Cross-check against the generated CMake code itself (belt and braces alongside the
+        # integration-level tests): the requirement must be LINK_ONLY-wrapped, not a plain link.
+        # (glob rather than a hardcoded path: the generators folder sits directly under the
+        # build folder for multi-config generators like Visual Studio, but gets an extra
+        # per-config subfolder for single-config ones like Ninja/Makefiles)
+        engine_targets_files = glob.glob(
+            os.path.join(build_folder, "**", "engine-Targets-release.cmake"), recursive=True)
+        assert len(engine_targets_files) == 1
+        engine_targets = c.load(engine_targets_files[0])
+        assert '"$<LINK_ONLY:$<$<CONFIG:RELEASE>:plugin::plugin>>"' in engine_targets
 
 
 @pytest.mark.tool("cmake")

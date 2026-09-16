@@ -474,7 +474,8 @@ class _CMakeContextGenerator:
                     link_feature = self._ctx.get_property("cmake_link_feature", d)
                     result[dep_target] = {
                         "link": req.libs,
-                        "link_feature": link_feature
+                        "link_feature": link_feature,
+                        "link_only": req.libs and req.headers is False,
                     }
                 return result
 
@@ -523,13 +524,15 @@ class _CMakeContextGenerator:
                             link = not (pkg_type is PackageType.SHARED and
                                         dep_comp.type is PackageType.SHARED)
                         link = req.libs or link
+                        link_only = link and req.headers is False
                         dep_target = self._ctx.get_property("cmake_target_name", transitive_dep, comp)
                         dep_target = dep_target or default_target
                         link_feature = self._ctx.get_property("cmake_link_feature", transitive_dep, comp)
 
                         result[dep_target] = {
                             "link": link,
-                            "link_feature": link_feature
+                            "link_feature": link_feature,
+                            "link_only": link_only,
                         }
             return result
 
