@@ -1,8 +1,11 @@
 import textwrap
 
+import pytest
+
 from conan.test.assets.sources import gen_function_cpp
 
 
+@pytest.mark.os_agnostic
 def test_aggregator(transitive_libraries):
     c = transitive_libraries
 

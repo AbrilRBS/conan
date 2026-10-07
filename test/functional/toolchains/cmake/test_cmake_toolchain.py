@@ -44,6 +44,7 @@ def test_cmake_toolchain_win_toolset(compiler, version, update, runtime):
     assert 'set(CMAKE_GENERATOR_TOOLSET "{}" CACHE STRING "" FORCE)'.format(value) in toolchain
 
 
+@pytest.mark.os_agnostic
 def test_cmake_toolchain_user_toolchain():
     client = TestClient(path_with_spaces=False)
     conanfile = GenConanfile().with_settings("os", "compiler", "build_type", "arch").\
@@ -56,6 +57,7 @@ def test_cmake_toolchain_user_toolchain():
     assert 'include("mytoolchain.cmake")' in toolchain
 
 
+@pytest.mark.os_agnostic
 def test_cmake_toolchain_user_toolchain_from_dep():
     client = TestClient()
     conanfile = textwrap.dedent("""
@@ -93,6 +95,7 @@ def test_cmake_toolchain_user_toolchain_from_dep():
     assert "mytoolchain.cmake !!!running!!!" in client.out
 
 
+@pytest.mark.os_agnostic
 def test_cmake_toolchain_without_build_type():
     # If "build_type" is not defined, toolchain will still be generated, it will not crash
     # Main effect is CMAKE_MSVC_RUNTIME_LIBRARY not being defined
@@ -161,6 +164,7 @@ def test_cmake_toolchain_cmake_vs_debugger_environment_not_needed():
     assert "CMAKE_VS_DEBUGGER_ENVIRONMENT" not in toolchain
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_cmake_toolchain_multiple_user_toolchain():
     """ A consumer consuming two packages that declare:
@@ -212,6 +216,7 @@ def test_cmake_toolchain_multiple_user_toolchain():
     assert "CMake Warning" not in client.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_cmaketoolchain_no_warnings():
     """Make sure uninitialized variables do not cause any warnings, passing -Werror=dev
@@ -245,6 +250,7 @@ def test_cmaketoolchain_no_warnings():
     # The real test is that there are no errors, it returns successfully
 
 
+@pytest.mark.os_agnostic
 def test_install_output_directories():
     """
     If we change the libdirs of the cpp.package, as we are doing cmake.install, the output directory
@@ -273,6 +279,7 @@ def test_install_output_directories():
     assert 'set(CMAKE_INSTALL_LIBDIR "mylibs")' in toolchain
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_cmake_toolchain_definitions_complex_strings():
     # https://github.com/conan-io/conan/issues/11043
@@ -473,6 +480,7 @@ class TestWinSDKVersion:
         assert "Conan toolchain: CMAKE_GENERATOR_PLATFORM=x64,version=10.0" in client.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake", "3.23")
 def test_cmake_layout_missing_option():
     client = TestClient(path_with_spaces=False)
@@ -484,6 +492,7 @@ def test_cmake_layout_missing_option():
     assert os.path.exists(os.path.join(client.current_folder, "build", "Release", "generators"))
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake", "3.23")
 def test_cmake_layout_missing_setting():
     client = TestClient(path_with_spaces=False)
@@ -543,6 +552,7 @@ def test_cmaketoolchain_sysroot():
     assert "sysroot: '{}'".format(output_fake_sysroot) in client.out
 
 
+@pytest.mark.os_agnostic
 def test_cmake_layout_not_forbidden_build_type():
     client = TestClient(path_with_spaces=False)
     client.run("new cmake_exe -d name=hello -d version=0.1")
@@ -553,6 +563,7 @@ def test_cmake_layout_not_forbidden_build_type():
                                        "build/release/generators/conan_toolchain.cmake"))
 
 
+@pytest.mark.os_agnostic
 def test_resdirs_cmake_install():
     """If resdirs is declared, the CMAKE_INSTALL_DATAROOTDIR folder is set"""
 
@@ -600,6 +611,7 @@ def test_resdirs_cmake_install():
     assert "Packaged 1 file: my_license" in client.out
 
 
+@pytest.mark.os_agnostic
 def test_resdirs_none_cmake_install():
     """If no resdirs are declared, the CMAKE_INSTALL_DATAROOTDIR folder is not set"""
 
@@ -712,6 +724,7 @@ def test_cmake_toolchain_vars_when_option_declared():
     assert "mylib position independent code: ON" in t.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 @pytest.mark.parametrize("single_profile", [True, False])
 def test_find_program_for_tool_requires(single_profile):
@@ -817,6 +830,7 @@ def test_find_program_for_tool_requires(single_profile):
         assert f"{host_context_package_folder}/include" in client.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("pkg_config")
 def test_cmaketoolchain_and_pkg_config_path():
     """
@@ -873,6 +887,7 @@ def test_cmaketoolchain_and_pkg_config_path():
     assert "Found dep, version 1.0" in client.out
 
 
+@pytest.mark.os_agnostic
 def test_cmaketoolchain_conf_from_tool_require():
     # https://github.com/conan-io/conan/issues/13914
     c = TestClient()
@@ -903,6 +918,7 @@ def test_cmaketoolchain_conf_from_tool_require():
     assert "set(CMAKE_SYSTEM_PROCESSOR ARM-POTATO)" in toolchain
 
 
+@pytest.mark.os_agnostic
 def test_inject_user_toolchain():
     client = TestClient()
 
@@ -949,6 +965,7 @@ def test_inject_user_toolchain():
     assert "IT WORKS!!!!" in client.out
 
 
+@pytest.mark.os_agnostic
 def test_no_build_type():
     client = TestClient()
 
@@ -994,6 +1011,7 @@ def test_no_build_type():
     assert "Don't specify 'build_type' at build time" not in client.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake", "3.23")
 def test_redirect_stdout():
     client = TestClient()
@@ -1156,6 +1174,7 @@ def test_cmake_toolchain_cxxflags_multi_config():
     assert "CPLUSPLUS: __cplusplus19" in c.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("ninja")
 @pytest.mark.tool("cmake", "3.23")
 def test_cmake_toolchain_ninja_multi_config():
@@ -1356,6 +1375,7 @@ def test_cmake_toolchain_crossbuild_set_cmake_compiler():
     assert 'sdk: 1.0.0' in c.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_cmake_toolchain_language_c():
     client = TestClient()
@@ -1490,6 +1510,7 @@ def test_cmake_linker_scripts():
     assert "PHDR segment not covered by LOAD segment" in c.out
 
 
+@pytest.mark.os_agnostic
 def test_cmake_toolchain_verbosity_propagation():
     t = TestClient(light=True)
     t.save({"conanfile.py": GenConanfile("mylib", "1.0")})

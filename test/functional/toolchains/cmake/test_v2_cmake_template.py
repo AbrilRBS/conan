@@ -5,6 +5,7 @@ import pytest
 from conan.test.utils.tools import TestClient
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_cmake_lib_template():
     client = TestClient(path_with_spaces=False)
@@ -33,6 +34,7 @@ def test_cmake_lib_template_create(matrix_client_shared_debug):
     assert "matrix/1.0: Hello World Release!" in client.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_cmake_exe_template():
     client = TestClient(path_with_spaces=False)

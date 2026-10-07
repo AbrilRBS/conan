@@ -2,9 +2,12 @@ import os
 import platform
 import textwrap
 
+import pytest
+
 from conan.test.utils.tools import TestClient
 
 
+@pytest.mark.os_agnostic
 def test_multi_cmake():
     conanfile = textwrap.dedent("""
         from conan import ConanFile

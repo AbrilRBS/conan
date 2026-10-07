@@ -1,6 +1,9 @@
 import textwrap
 
+import pytest
 
+
+@pytest.mark.os_agnostic
 def test_conditional_build_type(matrix_client_debug):
     # https://github.com/conan-io/conan/issues/15851
     c = matrix_client_debug

@@ -198,6 +198,7 @@ def test_custom_config_settings():
         assert "main: Release!" in c.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_changing_build_type():
     client = TestClient(path_with_spaces=False)

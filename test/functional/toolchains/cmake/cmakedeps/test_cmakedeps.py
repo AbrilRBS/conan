@@ -83,6 +83,7 @@ def test_transitive_multi_windows(client):
             assert "MYVARlibb: Release" in client.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_system_libs():
     conanfile = textwrap.dedent("""
@@ -160,6 +161,7 @@ def test_system_libs():
         assert micro_target_deps in client.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_system_libs_no_libs():
     """If the recipe doesn't declare cpp_info.libs then the target with the system deps, frameworks
@@ -224,6 +226,7 @@ def test_system_libs_no_libs():
                f"$<$<CONFIG:{build_type}>:{library_name}>" in client.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 @pytest.mark.parametrize("policy",
                          ["AnyNewerVersion", "SameMajorVersion", "SameMinorVersion", "ExactVersion"])
@@ -266,6 +269,7 @@ def test_cmake_config_version_compat_rejected(policy):
     assert "2.2.1" in client.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_system_libs_components_no_libs():
     """If the recipe doesn't declare cpp_info.libs then the target with the system deps, frameworks
@@ -330,6 +334,7 @@ def test_system_libs_components_no_libs():
                f"$<$<CONFIG:{build_type}>:{library_name}>" in client.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_do_not_mix_cflags_cxxflags():
     # TODO: Verify with components too
@@ -372,6 +377,7 @@ def test_do_not_mix_cflags_cxxflags():
     assert "cxxflags: three;four" in client.out
 
 
+@pytest.mark.os_agnostic
 def test_custom_configuration(client):
     """  The configuration in the build context is still the same than the host context"""
     conanfile = textwrap.dedent("""
@@ -409,6 +415,7 @@ def test_custom_configuration(client):
            open(os.path.join(curdir, data_name_context_host)).read()
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_buildirs_working():
     """  If a recipe declares cppinfo.buildirs those dirs will be exposed to be consumer
@@ -444,6 +451,7 @@ def test_buildirs_working():
     assert "MYVAR=>Like a Rolling Stone" in c.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_cpp_info_link_objects():
     client = TestClient()
@@ -502,6 +510,7 @@ def test_cpp_info_link_objects():
     assert "myobject: Release!" in client.out
 
 
+@pytest.mark.os_agnostic
 def test_private_transitive():
     # https://github.com/conan-io/conan/issues/9514
     client = TestClient()
@@ -517,6 +526,7 @@ def test_private_transitive():
     assert 'list(APPEND pkg_FIND_DEPENDENCY_NAMES )' in data_cmake
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_system_dep():
     """This test creates a zlib package and use the installation CMake FindZLIB.cmake to locate
@@ -622,6 +632,7 @@ def test_error_missing_build_type(matrix_client):
     assert "matrix/1.0: Hello World Release!" in c.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_map_imported_config(transitive_libraries):
     # https://github.com/conan-io/conan/issues/12041
@@ -701,6 +712,7 @@ def test_cmake_target_runtime_dlls(transitive_libraries):
     # if the DLL wasn't copied, the application would not run and show output
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_quiet():
     conanfile = textwrap.dedent("""

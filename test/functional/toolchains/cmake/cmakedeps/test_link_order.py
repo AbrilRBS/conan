@@ -335,7 +335,7 @@ def _run_and_get_lib_order(t, generator):
 
 
 # needs at least 3.23.3 because of error with "empty identity"
-@pytest.mark.parametrize("generator", [None, "Xcode"])
+@pytest.mark.parametrize("generator", [pytest.param(None, marks=pytest.mark.os_agnostic), "Xcode"])
 @pytest.mark.tool("cmake", "3.23")
 def test_cmake_deps(client, generator):
     if generator == "Xcode" and platform.system() != "Darwin":

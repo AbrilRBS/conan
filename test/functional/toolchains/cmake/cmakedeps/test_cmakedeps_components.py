@@ -56,6 +56,7 @@ class TestPropagateSpecificComponents:
         client.run('create middle.py --name=middle --version=version')
         self.cache_folder = client.cache_folder
 
+    @pytest.mark.os_agnostic
     def test_cmakedeps_app(self):
         t = TestClient(cache_folder=self.cache_folder)
         t.save({'conanfile.py': self.app})
@@ -64,6 +65,7 @@ class TestPropagateSpecificComponents:
         assert 'top::cmp1' in config
         assert "top::top" not in config
 
+    @pytest.mark.os_agnostic
     def test_cmakedeps_multi(self):
         t = TestClient(cache_folder=self.cache_folder)
         t.run('install --requires=middle/version@ -g CMakeDeps')
@@ -91,6 +93,7 @@ def top_conanfile():
     """)
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.parametrize("from_component", [False, True])
 def test_wrong_component(top_conanfile, from_component):
     """ If the requirement doesn't provide the component, it fails.
@@ -116,6 +119,7 @@ def test_wrong_component(top_conanfile, from_component):
     assert "Component 'top::not-existing' not found in 'top' package requirement" in t.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_components_system_libs():
     conanfile = textwrap.dedent("""
@@ -176,6 +180,7 @@ def test_components_system_libs():
     #       <CONFIG:Debug>
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_components_exelinkflags():
     conanfile = textwrap.dedent("""
@@ -282,6 +287,7 @@ def test_components_sharedlinkflags():
     #       <CONFIG:Debug>
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_cmake_add_subdirectory():
     """https://github.com/conan-io/conan/issues/11743

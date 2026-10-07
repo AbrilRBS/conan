@@ -98,6 +98,7 @@ consumer_conanfile = textwrap.dedent("""
     """)
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_build_modules_from_build_context(client):
     consumer_cmake = textwrap.dedent("""
@@ -128,6 +129,7 @@ def test_build_modules_from_build_context(client):
     assert "Generated code in build context!" in client.out
 
 
+@pytest.mark.os_agnostic
 def test_build_modules_and_target_from_build_context(client):
     consumer_cmake = textwrap.dedent("""
         set(CMAKE_CXX_COMPILER_WORKS 1)
@@ -157,6 +159,7 @@ def test_build_modules_and_target_from_build_context(client):
     assert "Generated code in build context!" in client.out
 
 
+@pytest.mark.os_agnostic
 def test_build_modules_from_host_and_target_from_build_context(client):
     consumer_cmake = textwrap.dedent("""
         set(CMAKE_CXX_COMPILER_WORKS 1)
@@ -185,6 +188,7 @@ def test_build_modules_from_host_and_target_from_build_context(client):
     assert "Generated code in host context!" in client.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_build_modules_and_target_from_host_context(client):
     consumer_cmake = textwrap.dedent("""
@@ -217,6 +221,7 @@ def test_build_modules_and_target_from_host_context(client):
     assert "Generated code in host context!" in client.out
 
 
+@pytest.mark.os_agnostic
 def test_exception_when_not_prefix_specified(client):
     cmake_deps_conf = """
         deps.build_context_activated = ["protobuf"]
@@ -230,6 +235,7 @@ def test_exception_when_not_prefix_specified(client):
            "CMakeDeps generator." in client.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_not_activated_not_fail(client):
     consumer_cmake = textwrap.dedent("""

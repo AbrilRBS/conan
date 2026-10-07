@@ -6,6 +6,7 @@ import pytest
 from conan.test.utils.tools import TestClient
 
 
+@pytest.mark.os_agnostic
 def test_cmake_find_none_transitive():
     c = TestClient()
 
@@ -107,6 +108,7 @@ def test_cmake_find_none_transitive():
     # And it doesn't fail to find transitive qt
 
 
+@pytest.mark.os_agnostic
 def test_cmake_find_none_relocation():
     c = TestClient(default_server_user=True)
     c.run("new cmake_lib -d name=pkg -d version=0.1")

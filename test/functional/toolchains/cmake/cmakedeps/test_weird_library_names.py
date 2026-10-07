@@ -58,6 +58,7 @@ def client_weird_lib_name():
     return c
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_cmakedeps(client_weird_lib_name):
     c = client_weird_lib_name

@@ -74,6 +74,7 @@ def client():
     return t
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_reuse_with_modules_and_config(client):
     cpp = gen_function_cpp(name="main")

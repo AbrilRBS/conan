@@ -1,8 +1,11 @@
 import textwrap
 
+import pytest
+
 from conan.test.utils.tools import TestClient
 
 
+@pytest.mark.os_agnostic
 def test_exports_sources_patch():
     """
     tests that using ``self.export_sources_folder`` we can access both from the source() and build()

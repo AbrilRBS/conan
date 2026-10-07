@@ -7,6 +7,7 @@ from conan.test.assets.sources import gen_function_cpp
 from conan.test.utils.tools import TestClient
 
 
+@pytest.mark.os_agnostic
 def test_exports_sources_own_code_in_subfolder():
     """ test that we can put the conanfile in a subfolder, and it can work. The key is
     the exports_sources() method that can do:
@@ -60,6 +61,7 @@ def test_exports_sources_own_code_in_subfolder():
     assert c.load("build/mylib.a") == "mylib"
 
 
+@pytest.mark.os_agnostic
 def test_exports_sources_common_code():
     """ very similar to the above, but intended for a multi-package project sharing some
     common code
@@ -112,6 +114,7 @@ def test_exports_sources_common_code():
     assert "conanfile.py (pkg/0.1): MYUTILS-BUILD: myutils!" in c.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_exports_sources_common_code_layout():
     """ Equal to the previous test, but actually building and using cmake_layout

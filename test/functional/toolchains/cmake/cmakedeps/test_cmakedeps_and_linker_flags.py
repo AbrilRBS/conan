@@ -62,6 +62,7 @@ def test_shared_link_flags():
     assert "hello/1.0: Hello World Release!" in client.out
 
 
+@pytest.mark.os_agnostic
 def test_not_mixed_configurations():
     # https://github.com/conan-io/conan/issues/11852
 

@@ -107,6 +107,7 @@ class TestExes:
             assert "Conan: Target declared imported executable 'MyTool::myexe'" in c.out
             assert "Mytool generating out.c!!!!!" in c.out
 
+    @pytest.mark.os_agnostic
     def test_exe_components(self):
         conanfile = textwrap.dedent(r"""
             import os
@@ -304,6 +305,7 @@ class TestLibs:
 
 
 class TestLibsIntegration:
+    @pytest.mark.os_agnostic
     def test_libs_no_location(self):
         # Integration test
         # https://github.com/conan-io/conan/issues/17256
@@ -327,6 +329,7 @@ class TestLibsIntegration:
         assert "ERROR: Error in generator 'CMakeConfigDeps': dep/0.1: Cannot obtain 'location' " \
                "for library 'dep'" in c.out
 
+    @pytest.mark.os_agnostic
     def test_custom_file_targetname(self):
         # Integration test
         c = TestClient()
@@ -472,6 +475,7 @@ class TestLibsLinkageTraits:
         c.run(f"build consumer {shared_flag} -c tools.cmake.cmakedeps:new={new_value}")
         # it works
 
+    @pytest.mark.os_agnostic
     @pytest.mark.tool("cmake", "3.27")
     def test_link_features(self):
         tc = TestClient()
@@ -497,6 +501,7 @@ class TestLibsLinkageTraits:
 
 @pytest.mark.tool("cmake")
 class TestLibsComponents:
+    @pytest.mark.os_agnostic
     def test_libs_components(self, matrix_client_components):
         """
         explicit usage of components
@@ -532,6 +537,7 @@ class TestLibsComponents:
             c.run_command(r".\build\Release\app.exe")
             assert "Matrix headers __cplusplus: __cplusplus2014" in c.out
 
+    @pytest.mark.os_agnostic
     def test_libs_components_default(self, matrix_client_components):
         """
         Test that the default components are used when no component is specified
@@ -561,6 +567,7 @@ class TestLibsComponents:
         assert "Conan: Target declared imported STATIC library 'matrix::module'" in c.out
         assert "Conan: Target declared imported INTERFACE library 'MatrixHeaders'" in c.out
 
+    @pytest.mark.os_agnostic
     def test_libs_components_default_error(self, matrix_client_components):
         """
         Same as above, but it fails, because headers is not in the default components
@@ -604,6 +611,7 @@ class TestLibsComponents:
         c.run(f"build . -c tools.cmake.cmakedeps:new={new_value}")
         assert "Running CMake.build()" in c.out  # Now it doesn't fail
 
+    @pytest.mark.os_agnostic
     def test_libs_components_transitive(self, matrix_client_components):
         """
         explicit usage of components
@@ -730,6 +738,7 @@ class TestLibsComponents:
         assert "physix: Release!" in c.out
         assert "vector: Release!" in c.out
 
+    @pytest.mark.os_agnostic
     def test_libs_components_multilib(self):
         """
         cpp_info.libs = ["lib1", "lib2"]
@@ -820,6 +829,7 @@ class TestLibsComponents:
         assert "module: Release!" in c.out
         assert "vector: Release!" in c.out
 
+    @pytest.mark.os_agnostic
     def test_libs_components_multilib_component(self):
         """
         cpp_info.components["mycomp"].libs = ["lib1", "lib2"]
@@ -1071,6 +1081,7 @@ class TestHeaders:
 
 
 class TestToolRequires:
+    @pytest.mark.os_agnostic
     def test_tool_requires(self):
         """ tool-requires should not define the try-compile or global variables
         for includedirs, libraries, definitions, otherwise the build-context would
@@ -1089,6 +1100,7 @@ class TestToolRequires:
         assert 'set(tool_INCLUDE_DIR' not in tool_config
         assert 'set(tool_LIBRARIES' not in tool_config
 
+    @pytest.mark.os_agnostic
     def test_libs_build_context(self):
         c = TestClient()
         c.run("new header_lib -d name=hello -d version=1.0 -o=hello")
@@ -1279,6 +1291,7 @@ class TestProtobuf:
                 "myapp.cpp": myapp}, clean_first=True)
         return c
 
+    @pytest.mark.os_agnostic
     def test_requires(self, protobuf):
         c = protobuf
         c.run(f"build . --build=missing")
@@ -1287,6 +1300,7 @@ class TestProtobuf:
         assert "Protoc RELEASE generating out.c!!!!!" in c.out
         assert 'Protoc imported configurations: RELEASE!!!' in c.out
 
+    @pytest.mark.os_agnostic
     def test_both(self, protobuf):
         consumer = textwrap.dedent("""
             import os
@@ -1357,6 +1371,7 @@ class TestConfigs:
         assert "matrix/1.0: Hello World Debug!" in c.out
         assert "app/0.1: Hello World Debug!" in c.out
 
+    @pytest.mark.os_agnostic
     def test_cross_config(self, matrix_client):
         # Release dependencies, but compiling app in Debug
         c = matrix_client
@@ -1385,6 +1400,7 @@ class TestConfigs:
         assert "matrix/1.0: Hello World Release!" in c.out
         assert "app/0.1: Hello World Debug!" in c.out
 
+    @pytest.mark.os_agnostic
     def test_cross_config_components(self, matrix_client_components):
         # Release dependencies, but compiling app in Debug
         c = matrix_client_components
@@ -1541,6 +1557,7 @@ class TestCMakeComponents:
         if not found:
             assert f"Conan: Error: 'dep' required COMPONENT '{components}' not found" in c.out
 
+    @pytest.mark.os_agnostic
     def test_components_default_definition(self):
         c = TestClient()
         dep = textwrap.dedent("""
@@ -1561,6 +1578,7 @@ class TestCMakeComponents:
         cmake = c.load("dep-config.cmake")
         assert 'set(dep_PACKAGE_PROVIDED_COMPONENTS MyC1 MyC2 c3)' in cmake
 
+    @pytest.mark.os_agnostic
     def test_components_individual_names(self):
         c = TestClient()
         dep = textwrap.dedent("""
@@ -1582,6 +1600,7 @@ class TestCMakeComponents:
 
 
 class TestCppInfoChecks:
+    @pytest.mark.os_agnostic
     def test_check_exe_libs(self):
         c = TestClient()
         dep = textwrap.dedent("""
@@ -1599,6 +1618,7 @@ class TestCppInfoChecks:
         assert ("Error in generator 'CMakeConfigDeps': dep/0.1 "
                 'cpp_info has both .exe and .libs' in c.out)
 
+    @pytest.mark.os_agnostic
     def test_exe_no_location(self):
         c = TestClient()
         dep = textwrap.dedent("""

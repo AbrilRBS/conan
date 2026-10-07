@@ -11,6 +11,7 @@ from conan.test.utils.tools import TestClient
 from conan.tools.files import replace_in_file
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_build(matrix_client):
     # This is not using the meta-project at all
@@ -23,6 +24,7 @@ def test_build(matrix_client):
 
 
 # The workspace CMake needs at least 3.25 for find_package to work
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake", "3.27")
 def test_metabuild(matrix_client):
     # This is using the meta-project
@@ -43,6 +45,7 @@ def test_metabuild(matrix_client):
 
 
 # The workspace CMake needs at least 3.25 for find_package to work
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake", "3.27")
 def test_new_template_and_different_folder():
     """
@@ -63,6 +66,7 @@ def test_new_template_and_different_folder():
 
 
 # The workspace CMake needs at least 3.25 for find_package to work
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake", "3.27")
 def test_super_build_different_layouts():
     """
