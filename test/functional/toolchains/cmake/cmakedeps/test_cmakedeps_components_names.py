@@ -8,10 +8,20 @@ from conan.api.model import RecipeReference
 from conan.test.assets.genconanfile import GenConanfile
 from conan.test.assets.sources import gen_function_h, gen_function_cpp
 from conan.test.utils.tools import TestClient
+from test.functional.utils import client_from, save_cache
 
 
 @pytest.fixture(scope="module")
-def setup_client_with_greetings():
+def _greetings(build_once):
+    return build_once("cmakedeps_components_greetings", _build_greetings)
+
+
+@pytest.fixture()
+def setup_client_with_greetings(_greetings):
+    return client_from(_greetings)
+
+
+def _build_greetings(folder):
     """
     creates a multi-component package with 2 components "hello" and "bye
     """
@@ -140,7 +150,7 @@ def setup_client_with_greetings():
     client.run("create . -s build_type=Debug")
     assert "hello: Debug!" in client.out
     assert "bye: Debug!" in client.out
-    return client
+    save_cache(client, folder)
 
 
 def create_chat(client, components, package_info, cmake_find, test_cmake_find):
