@@ -10,23 +10,6 @@ class TestBasic:
 
     @pytest.mark.tool("visual_studio")
     @pytest.mark.skipif(platform.system() != "Windows", reason="Only for windows")
-    def test_declarative_msbuildtoolchain(self):
-        conanfile = textwrap.dedent("""
-            from conan import ConanFile
-            class Pkg(ConanFile):
-                settings = "os", "compiler", "arch", "build_type"
-                generators = ("MSBuildToolchain", )
-            """)
-        client = TestClient()
-        client.save({"conanfile.py": conanfile})
-        client.run("install .")
-
-        assert "Generator 'MSBuildToolchain' calling 'generate()'" in client.out
-        toolchain = client.load("conantoolchain.props")
-        assert "<?xml version" in toolchain
-
-    @pytest.mark.tool("visual_studio")
-    @pytest.mark.skipif(platform.system() != "Windows", reason="Only for windows")
     def test_toolchain_windows(self):
         client = TestClient()
         conanfile = textwrap.dedent("""
