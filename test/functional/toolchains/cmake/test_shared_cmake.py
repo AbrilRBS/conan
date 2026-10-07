@@ -8,11 +8,20 @@ from conan.test.utils.mocks import ConanFileMock
 from conan.tools.env.environment import environment_wrap_command
 from conan.test.utils.tools import TestClient
 from conan.internal.util.files import rmdir
+from test.functional.utils import client_from, save_cache
 
 
 @pytest.fixture(scope="module")
-def transitive_shared_client():
-    # TODO: Reuse fixtures
+def _transitive_shared(build_once):
+    return build_once("transitive_shared_uploaded", _build_transitive_shared)
+
+
+@pytest.fixture()
+def transitive_shared_client(_transitive_shared):
+    return client_from(_transitive_shared)
+
+
+def _build_transitive_shared(folder):
     client = TestClient(default_server_user=True)
     client.run("new cmake_lib -d name=hello -d version=0.1")
     client.run("create . -o hello/*:shared=True -tf=")
@@ -25,7 +34,7 @@ def transitive_shared_client():
     client.run("create . -o chat/*:shared=True -o hello/*:shared=True -tf=")
     client.run("upload * -c -r default")
     client.run("remove * -c")
-    return client
+    save_cache(client, folder)
 
 
 @pytest.mark.tool("cmake")

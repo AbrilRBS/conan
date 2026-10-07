@@ -1,5 +1,6 @@
 import os
 import platform
+import shutil
 import textwrap
 
 import pytest
@@ -11,7 +12,11 @@ from conan.internal.util.runners import detect_runner
 
 
 @pytest.fixture(scope="module")
-def application_folder():
+def application_folder(build_once):
+    return build_once("cmd_args_to_string_app", _build_application)
+
+
+def _build_application(folder):
     """
     This is building a simple C app to print the received arguments and see if the obtained
     value is the expected once it is escaped by the Conan cmd_args_to_string tool
@@ -42,13 +47,12 @@ def application_folder():
     t.run_command("cmake . -DCMAKE_BUILD_TYPE=Release")
     if platform.system() == "Windows":
         t.run_command("cmake --build . --config Release")
+        exe = os.path.join(t.current_folder, "Release", "arg_printer.exe")
     else:
         t.run_command("cmake --build .")
-
-    if platform.system() == "Windows":
-        return os.path.join(t.current_folder, "Release")
-    else:
-        return t.current_folder
+        exe = os.path.join(t.current_folder, "arg_printer")
+    os.makedirs(folder)
+    shutil.copy2(exe, folder)
 
 
 @pytest.mark.tool("cmake")

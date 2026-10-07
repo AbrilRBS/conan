@@ -8,9 +8,9 @@ import pytest
 
 from conan.test.assets.sources import gen_function_h, gen_function_cpp
 from conan.test.utils.env import environment_update
-from conan.test.utils.test_files import temp_folder
 from conan.test.utils.tools import TestClient
 from test.conftest import _get_tool
+from test.functional.utils import save_cache, client_from
 
 
 @pytest.fixture(scope="session")
@@ -64,23 +64,6 @@ def _default_cmake():
     return environment_update({"PATH": cmake_path + os.pathsep + os.environ["PATH"]})
 
 
-def _save_cache(client, folder):
-    """ save the client cache, without the build and source folders, which are not needed to
-    consume the packages, so copying it is faster
-    """
-    client.run('cache clean "*"')
-    shutil.copytree(client.cache_folder, os.path.join(folder, ".conan2"))
-
-
-def _client_from(folder, path_with_spaces=True):
-    """ a new client using a copy of the cache saved with _save_cache() in folder
-    """
-    c = TestClient(path_with_spaces=path_with_spaces)
-    c.cache_folder = os.path.join(temp_folder(path_with_spaces=path_with_spaces), ".conan2")
-    shutil.copytree(os.path.join(folder, ".conan2"), c.cache_folder)
-    return c
-
-
 @pytest.fixture(scope="session")
 def _matrix(build_once):
     """
@@ -90,16 +73,16 @@ def _matrix(build_once):
         c = TestClient()
         c.run("new cmake_lib -d name=matrix -d version=1.0")
         c.run("create . -tf=")
-        _save_cache(c, folder)
+        save_cache(c, folder)
     return build_once("matrix", build)
 
 
 def _add_matrix_binaries(build_once, name, base, args):
     def build(folder):
-        c = _client_from(base)
+        c = client_from(base)
         c.run("new cmake_lib -d name=matrix -d version=1.0")
         c.run(f"create . {args} -tf=")
-        _save_cache(c, folder)
+        save_cache(c, folder)
     return build_once(name, build)
 
 
@@ -124,27 +107,27 @@ def _matrix_shared_debug(build_once, _matrix_shared):
 
 @pytest.fixture()
 def matrix_client(_matrix):
-    return _client_from(_matrix)
+    return client_from(_matrix)
 
 
 @pytest.fixture()
 def matrix_client_nospace(_matrix):
-    return _client_from(_matrix, path_with_spaces=False)
+    return client_from(_matrix, path_with_spaces=False)
 
 
 @pytest.fixture()
 def matrix_client_shared(_matrix_shared):
-    return _client_from(_matrix_shared)
+    return client_from(_matrix_shared)
 
 
 @pytest.fixture()
 def matrix_client_shared_debug(_matrix_shared_debug):
-    return _client_from(_matrix_shared_debug)
+    return client_from(_matrix_shared_debug)
 
 
 @pytest.fixture()
 def matrix_client_debug(_matrix_debug):
-    return _client_from(_matrix_debug)
+    return client_from(_matrix_debug)
 
 
 @pytest.fixture(scope="session")
@@ -153,18 +136,18 @@ def _transitive_libraries(build_once, _matrix):
     engine/1.0->matrix/1.0, engine static and shared, matrix static
     """
     def build(folder):
-        c = _client_from(_matrix)
+        c = client_from(_matrix)
         c.run("new cmake_lib -d name=engine -d version=1.0 -d requires=matrix/1.0")
         # create both static and shared
         c.run("create . -tf=")
         c.run("create . -o engine/*:shared=True -tf=")
-        _save_cache(c, folder)
+        save_cache(c, folder)
     return build_once("transitive_libraries", build)
 
 
 @pytest.fixture()
 def transitive_libraries(_transitive_libraries):
-    return _client_from(_transitive_libraries)
+    return client_from(_transitive_libraries)
 
 
 @pytest.fixture(scope="session")
@@ -265,12 +248,12 @@ def _build_matrix_components(folder):
             "CMakeLists.txt": cmakelists,
             "conanfile.py": conanfile})
     c.run("create .")
-    _save_cache(c, folder)
+    save_cache(c, folder)
 
 
 @pytest.fixture()
 def matrix_client_components(_matrix_client_components):
-    return _client_from(_matrix_client_components)
+    return client_from(_matrix_client_components)
 
 
 @pytest.fixture(scope="session")
@@ -348,9 +331,9 @@ def _build_matrix_c_interface(folder):
             "conanfile.py": conanfile,
             "CMakeLists.txt": cmake})
     c.run("create .")
-    _save_cache(c, folder)
+    save_cache(c, folder)
 
 
 @pytest.fixture()
 def matrix_c_interface_client(_matrix_c_interface_client):
-    return _client_from(_matrix_c_interface_client)
+    return client_from(_matrix_c_interface_client)

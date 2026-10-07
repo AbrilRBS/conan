@@ -1,4 +1,36 @@
+import os
+import shutil
+
+from conan.test.utils.test_files import temp_folder
+from conan.test.utils.tools import TestClient
 from conan.tools.microsoft.visual import vcvars_command
+
+
+def save_cache(client, folder):
+    """ save the client cache (and its servers storage) in folder, without the build and source
+    folders, which are not needed to consume the packages, so copying it is faster
+    """
+    client.run('cache clean "*"')
+    shutil.copytree(client.cache_folder, os.path.join(folder, ".conan2"))
+    for name, server in client.servers.items():
+        shutil.copytree(server.test_server._base_path, os.path.join(folder, "servers", name))
+
+
+def client_from(folder, path_with_spaces=True):
+    """ a new client using a copy of the cache (and the "default" server storage, if any) saved
+    with save_cache() in folder
+    """
+    server_folder = os.path.join(folder, "servers", "default")
+    has_server = os.path.isdir(server_folder)
+    c = TestClient(path_with_spaces=path_with_spaces, default_server_user=has_server or None)
+    c.cache_folder = os.path.join(temp_folder(path_with_spaces=path_with_spaces), ".conan2")
+    shutil.copytree(os.path.join(folder, ".conan2"), c.cache_folder)
+    if has_server:
+        server_path = c.servers["default"].test_server._base_path
+        shutil.rmtree(server_path)
+        shutil.copytree(server_folder, server_path)
+        c.update_servers()
+    return c
 
 
 def check_vs_runtime(artifact, client, vs_version, build_type, architecture="amd64",
