@@ -1,3 +1,4 @@
+import platform
 import textwrap
 
 import pytest
@@ -85,6 +86,7 @@ def test_transitive_build_scripts():
     assert "MYFUNCTION CMAKE A: Hello world A!!!" in c.out
 
 
+@pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
 @pytest.mark.tool("cmake")
 def test_reuse_macro_from_dep():
     """

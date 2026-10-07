@@ -7,6 +7,14 @@ from conan.test.utils.tools import TestClient
 
 ios10_armv8_settings = "-s os=iOS -s os.sdk=iphoneos -s os.version=10.0 -s arch=armv8"
 
+# These tests do not build anything (NONE language projects), they only check the CMake find logic,
+# which is not OS specific: run the native configurations in Linux only, and the iOS ones in Mac
+native_settings = pytest.param("", marks=pytest.mark.skipif(platform.system() != "Linux",
+                                                              reason="No OS specific test"))
+# Run the native configuration of one of them in Windows too, as a smoke test
+native_settings_and_windows = pytest.param("", marks=pytest.mark.skipif(
+    platform.system() not in ("Linux", "Windows"), reason="No OS specific test"))
+
 
 class _FindRootPathModes(object):
     def __init__(self, package=None, library=None, framework=None, include=None, program=None):
@@ -44,12 +52,12 @@ def _cmake_command_toolchain(find_root_path_modes):
 
 
 @pytest.mark.tool("cmake")
-@pytest.mark.parametrize("package", ["hello", "zlib"])
-@pytest.mark.parametrize("find_package", ["module", "config"])
+# "zlib" module checks that the package one has priority over the CMake FindZLIB, "hello" config
+@pytest.mark.parametrize("package, find_package", [("zlib", "module"), ("hello", "config")])
 @pytest.mark.parametrize(
     "settings",
     [
-        "",
+        native_settings,
         pytest.param(
             ios10_armv8_settings,
             marks=pytest.mark.skipif(platform.system() != "Darwin", reason="OSX only"),
@@ -110,6 +118,7 @@ def test_cmaketoolchain_path_find_package(package, find_package, settings, find_
     assert "HELLO FROM THE {package} FIND PACKAGE!".format(package=package) not in client.out
 
 
+@pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
 @pytest.mark.tool("cmake")
 def test_cmaketoolchain_path_find_package_editable():
     """ make sure a package in editable mode that contains a xxxConfig.cmake file can find that
@@ -164,7 +173,7 @@ def test_cmaketoolchain_path_find_package_editable():
 @pytest.mark.parametrize(
     "settings",
     [
-        "",
+        native_settings_and_windows,
         pytest.param(
             ios10_armv8_settings,
             marks=pytest.mark.skipif(platform.system() != "Darwin", reason="OSX only"),
@@ -251,7 +260,7 @@ def test_cmaketoolchain_path_find_package_real_config(settings, find_root_path_m
 @pytest.mark.parametrize(
     "settings",
     [
-        "",
+        native_settings,
         pytest.param(
             ios10_armv8_settings,
             marks=pytest.mark.skipif(platform.system() != "Darwin", reason="OSX only"),
@@ -307,7 +316,7 @@ def test_cmaketoolchain_path_include_cmake_modules(require_type, settings, find_
 @pytest.mark.parametrize(
     "settings",
     [
-        "",
+        native_settings,
         pytest.param(
             ios10_armv8_settings,
             marks=pytest.mark.skipif(platform.system() != "Darwin", reason="OSX only"),
@@ -362,7 +371,7 @@ def test_cmaketoolchain_path_find_file_find_path(settings, find_root_path_modes)
 @pytest.mark.parametrize(
     "settings",
     [
-        "",
+        native_settings,
         pytest.param(
             ios10_armv8_settings,
             marks=pytest.mark.skipif(platform.system() != "Darwin", reason="OSX only"),
@@ -430,7 +439,7 @@ def test_cmaketoolchain_path_find_library(settings, find_root_path_modes):
 @pytest.mark.parametrize(
     "settings",
     [
-        "",
+        native_settings,
         pytest.param(
             ios10_armv8_settings,
             marks=pytest.mark.skipif(platform.system() != "Darwin", reason="OSX only"),

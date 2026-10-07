@@ -1,4 +1,5 @@
 import os
+import platform
 import textwrap
 
 import pytest
@@ -26,15 +27,11 @@ def hello_client():
     ("hello", "1.2", "EXACT", False, False),
     ("hello", "0.1", "", False, False),
     ("hello", "2.0", "", False, False),
-    ("hello", "1.0", "REQUIRED", False, True),
-    ("hello", "1.1", "REQUIRED", False, True),
-    ("hello", "1.2", "REQUIRED", True, False),
-    ("hello", "1.0", "EXACT REQUIRED", True, False),
+    # REQUIRED is CMake behavior, failing when not found, no need to repeat all cases
     ("hello", "1.1", "EXACT REQUIRED", False, True),
-    ("hello", "1.2", "EXACT REQUIRED", True, False),
-    ("hello", "0.1", "REQUIRED", True, False),
-    ("hello", "2.0", "REQUIRED", True, False)
+    ("hello", "1.2", "REQUIRED", True, False),
 ])
+@pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
 @pytest.mark.tool("cmake")
 def test_version(hello_client, name, version, params, cmake_fails, package_found):
     client = hello_client
