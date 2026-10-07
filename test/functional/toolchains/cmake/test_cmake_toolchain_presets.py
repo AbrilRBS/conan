@@ -311,9 +311,9 @@ def test_cmake_user_presets_load(existing_user_presets):
     the `conan` object exists in the `vendor` field.
     """
     t = TestClient()
-    t.run("new -d name=mylib -d version=1.0 -f cmake_lib")
-    t.run("create . -s:h build_type=Release")
-    t.run("create . -s:h build_type=Debug")
+    # The consumer project doesn't compile or link anything, no need to build a real library
+    t.save({"conanfile.py": GenConanfile("mylib", "1.0")})
+    t.run("create .")
 
     consumer = textwrap.dedent("""
         from conan import ConanFile
