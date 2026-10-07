@@ -37,7 +37,6 @@ def conanfile():
 subfolders_arch = {"armv7": "ARM", "armv8": "ARM64", "x86": None, "x86_64": "x64"}
 
 
-@pytest.mark.os_agnostic
 @pytest.mark.parametrize("arch", ["x86_64", "x86", "armv7", "armv8"])
 @pytest.mark.parametrize("build_type", ["Debug", "Release"])
 def test_layout_in_cache(conanfile, build_type, arch):
@@ -64,7 +63,6 @@ def test_layout_in_cache(conanfile, build_type, arch):
     assert os.path.exists(os.path.join(pf, "include", "myheader.h"))
 
 
-@pytest.mark.os_agnostic
 @pytest.mark.parametrize("arch", ["x86_64", "x86", "armv7", "armv8"])
 @pytest.mark.parametrize("build_type", ["Debug", "Release"])
 def test_layout_with_local_methods(conanfile, build_type, arch):
@@ -116,7 +114,6 @@ def test_error_no_msvc():
     assert "Installing" in client.out
 
 
-@pytest.mark.os_agnostic
 def test_error_no_build_type():
     # https://github.com/conan-io/conan/issues/9953
     conanfile = textwrap.dedent("""
@@ -134,7 +131,6 @@ def test_error_no_build_type():
     assert " 'build_type' setting not defined, it is necessary for cmake_layout()" in client.out
 
 
-@pytest.mark.os_agnostic
 def test_cmake_layout_external_sources():
     conanfile = textwrap.dedent("""
         import os
@@ -181,7 +177,6 @@ def test_cmake_layout_external_sources():
     assert "Packaged 1 '.txt' file: build.txt" in client.out
 
 
-@pytest.mark.os_agnostic
 @pytest.mark.parametrize("with_build_type", [True, False])
 def test_basic_layout_external_sources(with_build_type):
     conanfile = textwrap.dedent("""
@@ -232,7 +227,6 @@ def test_basic_layout_external_sources(with_build_type):
     assert "Packaged 1 '.txt' file: build.txt" in client.out
 
 
-@pytest.mark.os_agnostic
 @pytest.mark.parametrize("with_build_type", [True, False])
 def test_basic_layout_no_external_sources(with_build_type):
     conanfile = textwrap.dedent("""
@@ -281,7 +275,6 @@ def test_basic_layout_no_external_sources(with_build_type):
     assert "Packaged 1 '.txt' file: build.txt" in client.out
 
 
-@pytest.mark.os_agnostic
 def test_cmake_layout_custom_build_folder():
     # https://github.com/conan-io/conan/issues/11838
     conanfile = textwrap.dedent("""

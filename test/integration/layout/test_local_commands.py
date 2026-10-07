@@ -2,13 +2,10 @@ import os
 import platform
 import textwrap
 
-import pytest
-
 from conan.test.assets.genconanfile import GenConanfile
 from conan.test.utils.tools import TestClient
 
 
-@pytest.mark.os_agnostic
 def test_local_static_generators_folder():
     """If we configure a generators folder in the layout, the generator files:
       - If belong to new generators: go to the specified folder: "my_generators"
@@ -35,7 +32,6 @@ def test_local_static_generators_folder():
     assert os.path.exists(cmake_toolchain_generator_path)
 
 
-@pytest.mark.os_agnostic
 def test_local_dynamic_generators_folder():
     """If we configure a generators folder in the layout, the generator files:
       - If belong to new generators: go to the specified folder: "my_generators"
@@ -65,7 +61,6 @@ def test_local_dynamic_generators_folder():
     assert os.path.exists(cmake_toolchain_generator_path)
 
 
-@pytest.mark.os_agnostic
 def test_no_layout_generators_folder():
     """If we don't configure a generators folder in the layout, the generator files:
       - all go to the install_folder
@@ -91,7 +86,6 @@ def test_no_layout_generators_folder():
     assert not os.path.exists(os.path.join(client.current_folder, "conan_toolchain.cmake"))
 
 
-@pytest.mark.os_agnostic
 def test_local_build():
     """If we configure a build folder in the layout, the installed files in a "conan build ."
     go to the specified folder: "my_build"
@@ -112,7 +106,6 @@ def test_local_build():
     assert os.path.exists(dll)
 
 
-@pytest.mark.os_agnostic
 def test_local_build_change_base():
     """If we configure a build folder in the layout, the build files in a "conan build ."
     go to the specified folder: "my_build under the modified base one "common"
@@ -132,7 +125,6 @@ def test_local_build_change_base():
     assert os.path.exists(dll)
 
 
-@pytest.mark.os_agnostic
 def test_local_source():
     """The "conan source" is NOT affected by the --output-folder
     """
@@ -151,7 +143,6 @@ def test_local_source():
     assert os.path.exists(header)
 
 
-@pytest.mark.os_agnostic
 def test_export_pkg():
     """The export-pkg, calling the "package" method, follows the layout if `cache_package_layout` """
     client = TestClient()
@@ -186,7 +177,6 @@ def test_export_pkg():
     assert os.path.exists(os.path.join(pf, "library.lib"))
 
 
-@pytest.mark.os_agnostic
 def test_export_pkg_local():
     """The export-pkg, without calling "package" method, with local package, follows the layout"""
     client = TestClient()
@@ -233,7 +223,6 @@ def test_export_pkg_local():
     assert os.path.exists(os.path.join(pf, "library.lib"))
 
 
-@pytest.mark.os_agnostic
 def test_start_dir_failure():
     c = TestClient()
     c.run("new cmake_lib -d name=dep -d version=0.1")
@@ -250,7 +239,6 @@ def test_start_dir_failure():
     assert os.path.exists(expected_path)
 
 
-@pytest.mark.os_agnostic
 def test_local_folders_without_layout():
     """ Test that the "conan install" can report the local source and build folder
     """
