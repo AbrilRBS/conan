@@ -92,8 +92,9 @@ def test_not_mixed_configurations():
     """)
 
     client.save({"CMakeLists.txt": cmake, "conanfile.py": conanfile})
-    client.run("create .")
-    client.run("create . -s build_type=Debug")
+    # The test_package is not needed, the consumer below checks both configurations
+    client.run("create . -tf=")
+    client.run("create . -s build_type=Debug -tf=")
     if platform.system() != "Windows":
         assert "libfoo_d.a" in client.out  # Just to make sure we built the foo_d
 
