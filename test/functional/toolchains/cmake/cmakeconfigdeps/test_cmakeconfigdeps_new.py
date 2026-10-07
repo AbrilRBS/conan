@@ -1102,6 +1102,7 @@ class TestToolRequires:
         assert "add_library(hello::hello INTERFACE IMPORTED)" in cmake
 
 
+@pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
 @pytest.mark.tool("cmake")
 @pytest.mark.parametrize("tool_requires", [True, False])
 def test_build_modules_custom_script(tool_requires):
@@ -1499,6 +1500,7 @@ class TestCMakeTry:
 
 class TestCMakeComponents:
 
+    @pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
     @pytest.mark.tool("cmake")
     @pytest.mark.parametrize("components, found", [("comp1", True), ("compX", False)])
     def test_components(self, components, found):
@@ -1630,6 +1632,7 @@ class TestCppInfoChecks:
         assert "dep/0.1 cpp_info incorrect .type shared-library for .exe myexe" in c.out
 
 
+@pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
 def test_multiple_find_package_subfolder():
     c = TestClient()
     conanfile = textwrap.dedent("""
@@ -1677,6 +1680,7 @@ def test_multiple_find_package_subfolder():
     assert "Conan: Target declared imported INTERFACE library 'matrix::matrix'" in c.out
 
 
+@pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
 @pytest.mark.tool("cmake", "3.27")
 def test_find_package_casing_non_fallback():
     """ CMakeConfigDeps creates hello_DIR by default, but CMake looks for
@@ -1716,6 +1720,7 @@ def test_find_package_casing_non_fallback():
     assert 'Could not find a package configuration file provided by "HellO"' in client.out
 
 
+@pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
 @pytest.mark.tool("cmake", "3.27")
 def test_find_package_extra_variants():
     """ Producers can now specify extra casing names for find_package.
@@ -1771,6 +1776,7 @@ def test_find_package_extra_variants():
     assert "Found hello!" not in client.out
 
 
+@pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
 @pytest.mark.tool("cmake")
 def test_find_package_quietly():
     conanfile = textwrap.dedent("""

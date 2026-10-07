@@ -1,3 +1,4 @@
+import platform
 import re
 import textwrap
 
@@ -44,6 +45,7 @@ def test_cmake_generated(client):
     assert "Conan: Target declared imported INTERFACE library 'dep::dep'" in c.out
 
 
+@pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
 @pytest.mark.tool("cmake")
 @pytest.mark.parametrize("lowercase", [False, True])
 def test_cmake_in_package(client, lowercase):
@@ -102,6 +104,7 @@ class TestRuntimeDirs:
 @pytest.mark.tool("cmake")
 class TestCMakeConfigDepsPaths:
 
+    @pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
     @pytest.mark.parametrize("requires, tool_requires", [(True, False), (False, True), (True, True)])
     def test_find_program_path(self, requires, tool_requires):
         """Test that executables in bindirs of tool_requires can be found with
@@ -151,6 +154,7 @@ class TestCMakeConfigDepsPaths:
         if requires and tool_requires:
             assert "There is already a 'tool/1.0' package contributing to CMAKE_PROGRAM_PATH" in c.out
 
+    @pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
     def test_find_include_and_lib_paths(self):
         c = TestClient()
         conanfile = textwrap.dedent("""
@@ -200,6 +204,7 @@ class TestCMakeConfigDepsPaths:
         assert "Found hello header" in c.out
         assert "Found hello lib" in c.out
 
+    @pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
     @pytest.mark.parametrize("require_type", ["requires", "tool_requires"])
     def test_include_modules(self, require_type):
         """Test that cmake module files in builddirs of requires and tool_requires
@@ -243,6 +248,7 @@ class TestCMakeConfigDepsPaths:
         c.run(f"build .")
         assert "MYOWNCMAKE FROM hello!" in c.out
 
+    @pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
     def test_include_modules_both_build_host(self):
         c = TestClient()
         conanfile = textwrap.dedent("""

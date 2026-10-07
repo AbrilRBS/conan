@@ -1,3 +1,4 @@
+import platform
 import textwrap
 import pytest
 
@@ -56,6 +57,7 @@ def test_global_alias():
     assert "hello link libraries: hello::hello" in client.out
 
 
+@pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
 @pytest.mark.tool("cmake")
 def test_component_alias():
     conanfile = textwrap.dedent("""
@@ -90,6 +92,7 @@ def test_component_alias():
     assert "hola::adios link libraries: hello::buy" in client.out
 
 
+@pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
 @pytest.mark.tool("cmake")
 def test_custom_name():
     conanfile = textwrap.dedent("""
@@ -124,6 +127,7 @@ def test_custom_name():
     assert "hello link libraries: ola::comprar" in client.out
 
 
+@pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
 @pytest.mark.tool("cmake")
 def test_collide_global_alias():
     """
@@ -160,6 +164,7 @@ def test_collide_global_alias():
     # assert "Target name 'hello::hello' already exists." in client.out
 
 
+@pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
 @pytest.mark.tool("cmake")
 def test_collide_component_alias():
     """

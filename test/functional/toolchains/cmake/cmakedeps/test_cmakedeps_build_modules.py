@@ -1,3 +1,4 @@
+import platform
 import textwrap
 
 import pytest
@@ -63,6 +64,7 @@ def test_build_modules_alias_target():
     assert "otherhello link libraries: hello::hello" in client.out
 
 
+@pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
 @pytest.mark.tool("cmake")
 def test_build_modules_custom_script():
     client = TestClient()
@@ -124,6 +126,7 @@ def test_build_modules_custom_script():
     assert "Hello myfunction!!!!" in client.out
 
 
+@pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
 @pytest.mark.tool("cmake")
 def test_build_modules_components_is_not_possible():
     """
@@ -205,6 +208,7 @@ def test_build_modules_components_is_not_possible():
     assert "ROOT MESSAGE:hello!" not in client.out
 
 
+@pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
 @pytest.mark.tool("cmake")
 @pytest.mark.parametrize("editable", [True, False])
 def test_build_modules_custom_script_editable(editable):
@@ -289,6 +293,7 @@ def test_build_modules_custom_script_editable(editable):
     assert "Hello contents of text file!!!!" in c.out
 
 
+@pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
 @pytest.mark.tool("cmake")
 @pytest.mark.parametrize("editable", [True, False])
 def test_build_modules_custom_script_editable_package(editable):

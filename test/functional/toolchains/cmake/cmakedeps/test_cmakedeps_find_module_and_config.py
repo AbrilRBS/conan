@@ -1,3 +1,4 @@
+import platform
 import textwrap
 
 import pytest
@@ -131,6 +132,7 @@ find_modes = [
 ]
 
 
+@pytest.mark.skipif(platform.system() != "Linux", reason="No OS specific test")
 @pytest.mark.tool("cmake")
 @pytest.mark.parametrize("find_mode_pkga, find_mode_pkgb, find_mode_consumer", find_modes)
 def test_transitive_modules_found(find_mode_pkga, find_mode_pkgb, find_mode_consumer):
