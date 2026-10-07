@@ -4,7 +4,6 @@ import textwrap
 
 import pytest
 
-from conan.test.utils.tools import TestClient
 from test.conftest import tools_locations
 
 xcode_project = textwrap.dedent("""
@@ -33,9 +32,9 @@ xcode_project_bare = textwrap.dedent("""
 
 main = textwrap.dedent("""
     #include <iostream>
-    #include "hello.h"
+    #include "matrix.h"
     int main(int argc, char *argv[]) {
-        hello();
+        matrix();
         #ifndef DEBUG
         std::cout << "App Release!" << std::endl;
         #else
@@ -58,13 +57,10 @@ test = textwrap.dedent("""
     """)
 
 
-@pytest.fixture(scope="module")
-def client():
-    client = TestClient()
-    client.run("new cmake_lib -d name=hello -d version=0.1")
-    client.run("create . -s build_type=Release")
-    client.run("create . -s build_type=Debug")
-    return client
+@pytest.fixture()
+def client(matrix_client_debug):
+    # matrix/1.0 static library, Release and Debug
+    return matrix_client_debug
 
 
 @pytest.mark.skipif(platform.system() != "Darwin", reason="Only for MacOS")
@@ -80,7 +76,7 @@ def test_project_xcodebuild(client):
         class MyApplicationConan(ConanFile):
             name = "myapplication"
             version = "1.0"
-            requires = "hello/0.1"
+            requires = "matrix/1.0"
             settings = "os", "compiler", "build_type", "arch"
             generators = "XcodeDeps"
             exports_sources = "app.xcodeproj/*", "app/*"
@@ -107,10 +103,10 @@ def test_project_xcodebuild(client):
     client.run("create . --build=missing -s os.version=15.0 -c tools.build:verbosity=verbose -c tools.compilation:verbosity=verbose")
     assert "MACOSX_DEPLOYMENT_TARGET=15.0" in client.out
     assert "xcodebuild: error: invalid option" not in client.out
-    assert "hello/0.1: Hello World Release!" in client.out
+    assert "matrix/1.0: Hello World Release!" in client.out
     assert "App Release!" in client.out
     client.run("create . -s build_type=Debug -s os.version=15.0 --build=missing")
-    assert "hello/0.1: Hello World Debug!" in client.out
+    assert "matrix/1.0: Hello World Debug!" in client.out
     assert "App Debug!" in client.out
 
 
@@ -125,7 +121,7 @@ def test_xcodebuild_test_different_sdk(client):
         class MyApplicationConan(ConanFile):
             name = "myapplication"
             version = "1.0"
-            requires = "hello/0.1"
+            requires = "matrix/1.0"
             settings = "os", "compiler", "build_type", "arch"
             generators = "XcodeDeps"
             exports_sources = "app.xcodeproj/*", "app/*"
@@ -161,7 +157,7 @@ def test_missing_sdk(client):
         class MyApplicationConan(ConanFile):
             name = "myapplication"
             version = "1.0"
-            requires = "hello/0.1"
+            requires = "matrix/1.0"
             settings = "os", "compiler", "build_type", "arch"
             generators = "XcodeDeps"
             exports_sources = "app.xcodeproj/*", "app/*"
@@ -194,7 +190,7 @@ def test_project_xcodebuild_cli_args(client, no_copy_source):
         class MyApplicationConan(ConanFile):
             name = "myapplication"
             version = "1.0"
-            requires = "hello/0.1"
+            requires = "matrix/1.0"
             settings = "os", "compiler", "build_type", "arch"
             generators = "XcodeDeps"
             exports_sources = "app.xcodeproj/*", "app/*"
@@ -228,7 +224,7 @@ def test_project_xcodebuild_cli_args(client, no_copy_source):
 
         build_folder = re.search(r"Building your package in (/.+)", client.out).group(1)
 
-        assert f"OBJROOT = {build_folder}"
-        assert f"SYMROOT = {build_folder}"
+        assert f"OBJROOT={build_folder}" in client.out
+        assert f"SYMROOT={build_folder}" in client.out
         assert "-xcconfig" in client.out
         assert f"App {build_type}!" in client.out
