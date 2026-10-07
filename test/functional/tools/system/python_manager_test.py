@@ -8,6 +8,12 @@ from conan.internal.util.files import save_files
 from conan.test.utils.test_files import temp_folder
 
 
+# Creating virtualenvs with UV downloads uv and Python interpreters (~30-60s), it is not OS
+# specific, run it in every PR in Linux, and in all OSs only in develop2
+slow_out_of_linux = pytest.mark.slow if platform.system() != "Linux" else \
+    pytest.mark.skipif(False, reason="")
+
+
 def _create_py_hello_world(folder):
     setup_py = textwrap.dedent("""
         from setuptools import setup, find_packages
@@ -174,6 +180,7 @@ def test_create_py_manager():
     assert "Hello Test World!" in client.out
 
 
+@slow_out_of_linux
 @pytest.mark.skipif(sys.version_info.minor < 8, reason="UV needs Python >= 3.8")
 def test_build_uv_manager():
 
@@ -237,6 +244,7 @@ def test_build_uv_manager():
     assert "Hello Test World!" in client.out
 
 
+@slow_out_of_linux
 @pytest.mark.skipif(sys.version_info.minor < 8, reason="UV needs Python >= 3.8")
 def test_fail_build_uv_manager():
 
@@ -276,11 +284,8 @@ def test_fail_build_uv_manager():
 
 
 def test_build_deprecated_python_manager():
-    pip_package_folder = temp_folder(path_with_spaces=True)
-    _create_py_hello_world(pip_package_folder)
-    pip_package_folder = pip_package_folder.replace('\\', '/')
-
-    conanfile_pyenv = textwrap.dedent(f"""
+    # PipEnv is just the old name of PyEnv, the other tests check its functionality
+    conanfile_pyenv = textwrap.dedent("""
         from conan import ConanFile
         from conan.tools.system import PipEnv
         from conan.tools.layout import basic_layout
@@ -290,22 +295,13 @@ def test_build_deprecated_python_manager():
                 basic_layout(self)
 
             def generate(self):
-                pip = PipEnv(self)
-                pip.install(["{pip_package_folder}"])
-                pip.generate()
-
-            def build(self):
-                self.run("hello-world")
+                PipEnv(self)
         """)
 
     client = TestClient(path_with_spaces=False)
-    # FIXME: the python shebang inside vitual env packages fails when using path_with_spaces
     client.save({"pip/conanfile.py": conanfile_pyenv})
     client.run("build pip")
-
     assert "WARN: deprecated: 'PipEnv()' is deprecated, use 'PyEnv()'" in client.out
-    assert "RUN: hello-world" in client.out
-    assert "Hello Test World!" in client.out
 
 
 @pytest.mark.parametrize("verbosity", ["-verror", "-vstatus"])
