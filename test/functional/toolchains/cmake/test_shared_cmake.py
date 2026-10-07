@@ -200,16 +200,6 @@ def test_shared_cmake_toolchain_components():
     assert "hello/0.1: Hello World Release!" in client.out
 
 
-@pytest.mark.tool("cmake")
-def test_shared_cmake_toolchain_test_package():
-    # TODO: This is already tested in other places
-    client = TestClient()
-    client.run("new cmake_lib -d name=hello -d version=0.1")
-    client.run("create . -o hello/*:shared=True")
-    assert "hello/0.1: Hello World Release!" in client.out
-    assert "hello/0.1 test_package" in client.out
-
-
 @pytest.fixture()
 def test_client_shared():
     client = TestClient()

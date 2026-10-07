@@ -4,6 +4,7 @@ import textwrap
 
 import pytest
 
+from conan.test.assets.genconanfile import GenConanfile
 from conan.test.utils.tools import TestClient
 
 
@@ -291,11 +292,12 @@ def test_cpp_info_require_whole_package():
 
 
 @pytest.mark.skipif(platform.system() != "Darwin", reason="Only for MacOS")
-@pytest.mark.tool("cmake")
 def test_xcodedeps_test_require():
     client = TestClient()
-    client.run("new cmake_lib -d name=gtest -d version=1.0")
-    client.run("create . -tf=\"\"")
+    # Only the generated .xcconfig files are checked, no need to build a real library
+    client.save({"conanfile.py": GenConanfile("gtest", "1.0").with_settings("os", "compiler",
+                                                                            "build_type", "arch")})
+    client.run("create .")
 
     # Create library having build and test requires
     conanfile = textwrap.dedent(r'''

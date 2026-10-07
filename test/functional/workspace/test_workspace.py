@@ -12,14 +12,10 @@ from conan.tools.files import replace_in_file
 
 
 @pytest.mark.tool("cmake")
-def test_build():
+def test_build(matrix_client):
     # This is not using the meta-project at all
-    c = TestClient()
-    c.run("new cmake_lib -d name=mymath")
-    c.run("create . -tf=")
-
-    c.save({}, clean_first=True)
-    c.run("new workspace -d requires=mymath/0.1")
+    c = matrix_client
+    c.run("new workspace -d requires=matrix/1.0")
     c.run("workspace build")
     assert "conanfile.py (app1/0.1): Calling build()" in c.out
     assert "conanfile.py (app1/0.1): Running CMake.build()" in c.out
@@ -28,21 +24,17 @@ def test_build():
 
 # The workspace CMake needs at least 3.25 for find_package to work
 @pytest.mark.tool("cmake", "3.27")
-def test_metabuild():
+def test_metabuild(matrix_client):
     # This is using the meta-project
-    c = TestClient()
-    c.run("new cmake_lib -d name=mymath")
-    c.run("create . -tf=")
-
-    c.save({}, clean_first=True)
-    c.run("new workspace -d requires=mymath/0.1")
+    c = matrix_client
+    c.run("new workspace -d requires=matrix/1.0")
     c.run("workspace super-install")
     assert os.path.exists(os.path.join(c.current_folder, "CMakeUserPresets.json"))
     build_folder = "build/Release" if platform.system() != "Windows" else "build"
     assert os.path.exists(os.path.join(c.current_folder, build_folder, "generators"))
     config_preset = "conan-default" if platform.system() == "Windows" else "conan-release"
     c.run_command(f"cmake --preset {config_preset}")
-    assert "Conan: Target declared 'mymath::mymath'" in c.out
+    assert "Conan: Target declared 'matrix::matrix'" in c.out
     assert "Adding project: liba" in c.out
     assert "Adding project: libb" in c.out
     assert "Adding project: app1" in c.out

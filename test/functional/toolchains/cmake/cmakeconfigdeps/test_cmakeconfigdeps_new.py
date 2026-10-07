@@ -356,42 +356,32 @@ class TestLibsIntegration:
 
 
 class TestLibsLinkageTraits:
-    def test_linkage_shared_static(self):
+    def test_linkage_shared_static(self, transitive_libraries):
         """
         the static library is skipped
         """
-        c = TestClient()
-        c.run("new cmake_lib -d name=matrix -d version=0.1")
-        c.run(f"create . -c tools.cmake.cmakedeps:new={new_value} -tf=")
-
-        c.save({}, clean_first=True)
-        c.run("new cmake_lib -d name=engine -d version=0.1 -d requires=matrix/0.1")
-        c.run(f"create . -o engine/*:shared=True -c tools.cmake.cmakedeps:new={new_value} -tf=")
-
-        c.save({}, clean_first=True)
-        c.run("new cmake_exe -d name=game -d version=0.1 -d requires=engine/0.1")
+        c = transitive_libraries  # engine/1.0 (static and shared) -> matrix/1.0 (static)
+        c.run("new cmake_exe -d name=game -d version=0.1 -d requires=engine/1.0")
         c.run(f"create . -o engine/*:shared=True -c tools.cmake.cmakedeps:new={new_value} "
               "-c tools.compilation:verbosity=verbose")
-        assert re.search(r"Skipped host binaries(\s*)matrix/0.1", c.out)
-        assert "matrix/0.1: Hello World Release!"
-        assert "engine/0.1: Hello World Release!"
-        assert "game/0.1: Hello World Release!"
+        assert re.search(r"Skipped host binaries(\s*)matrix/1.0", c.out)
+        assert "matrix/1.0: Hello World Release!" in c.out
+        assert "engine/1.0: Hello World Release!" in c.out
+        assert "game/0.1: Hello World Release!" in c.out
 
     @pytest.mark.tool("cmake", "3.27")
     @pytest.mark.parametrize("shared", [False, True])
-    def test_transitive_headers(self, shared):
-        c = TestClient()
-        c.run("new cmake_lib -d name=matrix -d version=0.1")
-        c.run(f"create . -o *:shared={shared} -c tools.cmake.cmakedeps:new={new_value} -tf=")
+    def test_transitive_headers(self, shared, request):
+        fixture = "matrix_client_shared" if shared else "matrix_client"
+        c = request.getfixturevalue(fixture)  # matrix/1.0
 
-        c.save({}, clean_first=True)
-        c.run("new cmake_lib -d name=engine -d version=0.1 -d requires=matrix/0.1")
+        c.run("new cmake_lib -d name=engine -d version=0.1 -d requires=matrix/1.0")
         engine_h = c.load("include/engine.h")
         engine_h = "#include <matrix.h>\n" + engine_h
         c.save({"include/engine.h": engine_h})
         conanfile = c.load("conanfile.py")
-        conanfile = conanfile.replace('self.requires("matrix/0.1")',
-                                      'self.requires("matrix/0.1", transitive_headers=True)')
+        conanfile = conanfile.replace('self.requires("matrix/1.0")',
+                                      'self.requires("matrix/1.0", transitive_headers=True)')
         c.save({"conanfile.py": conanfile})
         c.run(f"create . -o *:shared={shared} -c tools.cmake.cmakedeps:new={new_value} -tf=")
 
@@ -1348,8 +1338,8 @@ class TestProtobuf:
 @pytest.mark.tool("cmake", "3.27")
 class TestConfigs:
     @pytest.mark.skipif(platform.system() != "Windows", reason="Only MSVC multi-conf")
-    def test_multi_config(self, matrix_client):
-        c = matrix_client
+    def test_multi_config(self, matrix_client_debug):
+        c = matrix_client_debug
         c.run("new cmake_exe -d name=app -d version=0.1 -d requires=matrix/1.0")
         c.run(f"install . -c tools.cmake.cmakedeps:new={new_value}")
         c.run("install . -s build_type=Debug --build=missing "

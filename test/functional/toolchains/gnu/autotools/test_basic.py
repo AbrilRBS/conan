@@ -391,14 +391,12 @@ def test_install_output_directories(matrix_client_nospace):
 
 @pytest.mark.skipif(platform.system() not in ["Linux", "Darwin"], reason="Requires Autotools")
 @pytest.mark.tool("autotools")
-def test_autotools_with_pkgconfigdeps():
-    client = TestClient(path_with_spaces=False)
-    client.run("new cmake_lib -d name=hello -d version=1.0")
-    client.run("create .")
+def test_autotools_with_pkgconfigdeps(matrix_client_nospace):
+    client = matrix_client_nospace
 
     consumer_conanfile = textwrap.dedent("""
         [requires]
-        hello/1.0
+        matrix/1.0
         [generators]
         AutotoolsToolchain
         PkgConfigDeps
@@ -407,12 +405,12 @@ def test_autotools_with_pkgconfigdeps():
     client.run("install .")
 
     client.run_command(". ./conanautotoolstoolchain.sh && "
-                       "pkg-config --cflags hello && "
-                       "pkg-config --libs-only-l hello && "
-                       "pkg-config --libs-only-L --libs-only-other hello")
+                       "pkg-config --cflags matrix && "
+                       "pkg-config --libs-only-l matrix && "
+                       "pkg-config --libs-only-L --libs-only-other matrix")
 
     assert re.search("I.*/p/include", str(client.out))
-    assert "-lhello" in client.out
+    assert "-lmatrix" in client.out
     assert re.search("L.*/p/lib", str(client.out))
 
 
