@@ -12,7 +12,7 @@ def test_cmake_lib_template():
     # Local flow works
     client.run("build .")
 
-    client.run("export-pkg .")
+    client.run("export-pkg . -tf=")  # the test_package is checked in the "create" test
     package_folder = client.created_layout().package()
     assert os.path.exists(os.path.join(package_folder, "include", "hello.h"))
 
@@ -29,7 +29,7 @@ def test_cmake_lib_template_create(matrix_client_shared_debug):
     assert "matrix/1.0: Hello World Debug!" in client.out
 
     # Create + shared works
-    client.run("create . -o hello/*:shared=True --build=never")
+    client.run("create . -o matrix/*:shared=True --build=never")
     assert "matrix/1.0: Hello World Release!" in client.out
 
 
