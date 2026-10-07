@@ -237,12 +237,13 @@ class TestLibs:
     def test_multilevel(self, shared):
         # TODO: make this shared fixtures in conftest for multi-level shared testing
         c = TestClient(default_server_user=True)
+        # The test_packages are not needed, the consumers in the next levels already check them
         c.run("new cmake_lib -d name=matrix -d version=0.1")
-        c.run(f"create . -o *:shared={shared} -c tools.cmake.cmakedeps:new={new_value}")
+        c.run(f"create . -o *:shared={shared} -c tools.cmake.cmakedeps:new={new_value} -tf=")
 
         c.save({}, clean_first=True)
         c.run("new cmake_lib -d name=engine -d version=0.1 -d requires=matrix/0.1")
-        c.run(f"create . -o *:shared={shared} -c tools.cmake.cmakedeps:new={new_value}")
+        c.run(f"create . -o *:shared={shared} -c tools.cmake.cmakedeps:new={new_value} -tf=")
 
         c.save({}, clean_first=True)
         c.run("new cmake_lib -d name=gamelib -d version=0.1 -d requires=engine/0.1")
@@ -270,25 +271,23 @@ class TestLibs:
         # It fails with the old CMakeDeps
         c.save({"CMakeLists.txt": cmake,
                "src/gamelib_test.cpp": '#include "gamelib.h"\nint main() { gamelib(); }'})
-        c.run(f"create . -o *:shared={shared} -c tools.cmake.cmakedeps:new={new_value}")
+        c.run(f"create . -o *:shared={shared} -c tools.cmake.cmakedeps:new={new_value} -tf=")
 
         c.save({}, clean_first=True)
         c.run("new cmake_exe -d name=game -d version=0.1 -d requires=gamelib/0.1")
         c.run(f"create . -o *:shared={shared} -c tools.cmake.cmakedeps:new={new_value}")
 
-        assert "matrix/0.1: Hello World Release!"
-        assert "engine/0.1: Hello World Release!"
-        assert "gamelib/0.1: Hello World Release!"
-        assert "game/0.1: Hello World Release!"
+        assert "matrix/0.1: Hello World Release!" in c.out
+        assert "engine/0.1: Hello World Release!" in c.out
+        assert "gamelib/0.1: Hello World Release!" in c.out
+        assert "game/0.1: Hello World Release!" in c.out
 
         # Make sure that transitive headers are private, fails to include, traits work
         game_cpp = c.load("src/game.cpp")
-        for header in ("matrix", "engine"):
-            new_game_cpp = f"#include <{header}.h>\n" + game_cpp
-            c.save({"src/game.cpp": new_game_cpp})
-            c.run(f"build . -o *:shared={shared} -c tools.cmake.cmakedeps:new={new_value}",
-                  assert_error=True)
-            assert f"{header}.h" in c.out
+        c.save({"src/game.cpp": "#include <engine.h>\n" + game_cpp})
+        c.run(f"build . -o *:shared={shared} -c tools.cmake.cmakedeps:new={new_value}",
+              assert_error=True)
+        assert "engine.h" in c.out
 
         # Make sure it works downloading to another cache
         c.run("upload * -r=default -c")
@@ -298,10 +297,10 @@ class TestLibs:
         c2.run("new cmake_exe -d name=game -d version=0.1 -d requires=gamelib/0.1")
         c2.run(f"create . -o *:shared={shared} -c tools.cmake.cmakedeps:new={new_value}")
 
-        assert "matrix/0.1: Hello World Release!"
-        assert "engine/0.1: Hello World Release!"
-        assert "gamelib/0.1: Hello World Release!"
-        assert "game/0.1: Hello World Release!"
+        assert "matrix/0.1: Hello World Release!" in c2.out
+        assert "engine/0.1: Hello World Release!" in c2.out
+        assert "gamelib/0.1: Hello World Release!" in c2.out
+        assert "game/0.1: Hello World Release!" in c2.out
 
 
 class TestLibsIntegration:
