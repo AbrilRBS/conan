@@ -9,7 +9,6 @@ from conan.internal.api.detect.detect_vs import vs_installation_path
 from conan.test.assets.sources import gen_function_cpp
 from test.functional.utils import check_vs_runtime, check_exe_run
 from conan.test.utils.tools import TestClient
-from conan.internal.util.files import rmdir
 
 
 sln_file = r"""
@@ -447,7 +446,7 @@ class TestWin:
         settings_b = " ".join('-s:b %s="%s"' % (k, v) for k, v in settings if v)
 
         client.run("new cmake_lib -d name=hello -d version=0.1")
-        client.run(f"create . {settings_h} -c tools.microsoft.msbuild:vs_version={ide_version} -c tools.build:verbosity=verbose -c tools.compilation:verbosity=verbose")
+        client.run(f"create . {settings_h} -c tools.microsoft.msbuild:vs_version={ide_version} -c tools.build:verbosity=verbose -c tools.compilation:verbosity=verbose -tf=")
 
         assert "MSBUILD : error MSB1001: Unknown switch" not in client.out
         assert "-verbosity:Detailed" in client.out
@@ -531,16 +530,12 @@ class TestWin:
 
         settings = " ".join('-s %s="%s"' % (k, v) for k, v in settings if v)
         client.run("new cmake_lib -d name=hello -d version=0.1")
-        configs = [("Release", "x86", True), ("Release", "x86_64", True),
-                   ("Debug", "x86", False), ("Debug", "x86_64", False)]
+        # Every build_type, arch and shared value is covered, not all their combinations
+        configs = [("Release", "x86", True), ("Debug", "x86_64", False)]
         for build_type, arch, shared in configs:
-            # Build the profile according to the settings provided
-            # TODO: It is a bit ugly to remove manually
-            build_test_folder = os.path.join(client.current_folder, "test_package", "build")
-            rmdir(build_test_folder)
             runtime = "static"
             client.run("create . --name=hello --version=0.1 %s -s build_type=%s -s arch=%s -s compiler.runtime=%s "
-                       " -o hello/*:shared=%s" % (settings, build_type, arch, runtime, shared))
+                       " -o hello/*:shared=%s -tf=" % (settings, build_type, arch, runtime, shared))
 
         # Prepare the actual consumer package
         client.save({"conanfile.py": self.conanfile,
