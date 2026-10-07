@@ -141,7 +141,7 @@ def test_cmake_find_none_relocation():
     c.save({"conanfile.py": conanfile,
             "CMakeLists.txt": cmake_export})
 
-    c.run("create . ")
+    c.run("create . -tf=")  # The consumer in another cache below is the real check
     c.run("upload * -r=default -c")
     c.run("remove * -c")
 
@@ -248,8 +248,9 @@ def test_cmake_find_none_relocation_multi():
     c.save({"conanfile.py": conanfile,
             "CMakeLists.txt": cmake_export})
 
-    c.run("create .")
-    c.run("create . -s build_type=Debug")
+    # The consumer in another cache below is the real check
+    c.run("create . -tf=")
+    c.run("create . -s build_type=Debug -tf=")
     c.run("upload * -r=default -c")
     c.run("remove * -c")
 

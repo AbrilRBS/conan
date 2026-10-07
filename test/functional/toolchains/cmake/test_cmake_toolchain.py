@@ -449,7 +449,7 @@ class TestWinSDKVersion:
                  '${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")'
         client.save({"CMakeLists.txt": cmake})
         client.run("create . -s arch=x86_64 -s compiler.version=194 "
-                   "-c tools.microsoft:winsdk_version=10.0")
+                   "-c tools.microsoft:winsdk_version=10.0 -tf=")
         assert "CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION = 10.0" in client.out
         assert "Conan toolchain: CMAKE_GENERATOR_PLATFORM=x64" in client.out
         assert "Conan toolchain: CMAKE_GENERATOR_PLATFORM=x64,version" not in client.out
@@ -467,7 +467,7 @@ class TestWinSDKVersion:
                  '${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION}")'
         client.save({"CMakeLists.txt": cmake})
         client.run("create . -s arch=x86_64 -s compiler.version=194 "
-                   "-c tools.microsoft:winsdk_version=10.0 "
+                   "-c tools.microsoft:winsdk_version=10.0 -tf= "
                    '-c tools.cmake.cmaketoolchain:generator="Visual Studio 17"')
         assert "CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION = 10.0" in client.out
         assert "Conan toolchain: CMAKE_GENERATOR_PLATFORM=x64,version=10.0" in client.out
