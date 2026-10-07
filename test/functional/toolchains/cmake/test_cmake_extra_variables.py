@@ -5,6 +5,7 @@ from conan.test.utils.tools import TestClient
 new_value = "will_break_next"
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake", "3.27")
 @pytest.mark.parametrize("generator", ["CMakeDeps", "CMakeConfigDeps"])
 def test_package_info_extra_variables(generator):

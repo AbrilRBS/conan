@@ -99,6 +99,7 @@ class TestMesonInstall:
         target_link_libraries(${PROJECT_NAME} hello::hello)
         """)
 
+    @pytest.mark.os_agnostic
     @pytest.mark.tool("ninja")
     @pytest.mark.tool("meson")
     @pytest.mark.tool("cmake")

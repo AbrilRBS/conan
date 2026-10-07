@@ -47,6 +47,7 @@ class TestMeson:
                 meson.test()
         """)
 
+    @pytest.mark.os_agnostic
     def test_reuse(self, matrix_client):
         t = matrix_client  # matrix/1.0 static library, only its Meson test_package is built
 

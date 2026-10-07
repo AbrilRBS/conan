@@ -31,6 +31,7 @@ def test_meson_lib_template():
     assert "hello/0.1: Hello World Release!" in client.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("ninja")
 @pytest.mark.tool("meson")
 def test_meson_exe_template():

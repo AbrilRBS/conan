@@ -49,6 +49,7 @@ def client():
     return c
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_zlib_not_included(client):
 
@@ -86,6 +87,7 @@ def test_zlib_not_included(client):
     assert not os.path.exists(os.path.join(client.current_folder, "zlib-config.cmake"))
 
 
+@pytest.mark.os_agnostic
 def test_error_cmakedeps_transitive_build_requires(transitive_libraries):
     """
     CMakeDeps when building an intermediate "tool_requires" that has a normal "requires"
@@ -131,6 +133,7 @@ def test_error_cmakedeps_transitive_build_requires(transitive_libraries):
     assert "Full package reference: tool/0.1" in c.out
 
 
+@pytest.mark.os_agnostic
 def test_transitive_tool_requires_visible():
     # https://github.com/conan-io/conan/issues/16058
     # The "tool/0.1", even if visible doesn't generate any files in the "app" consumer side,

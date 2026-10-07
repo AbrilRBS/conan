@@ -161,6 +161,7 @@ _test_package_cmake_lists = textwrap.dedent("""
     """)
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("ninja")
 @pytest.mark.tool("cmake")
 @pytest.mark.tool("meson")

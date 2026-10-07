@@ -13,6 +13,7 @@ from conan.test.utils.tools import TestClient
 from conan.tools.cmake.presets import load_cmake_presets
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake", "3.23")
 def test_cmake_presets_multiple_settings_single_config():
     client = TestClient(path_with_spaces=False)
@@ -114,6 +115,7 @@ def test_cmake_presets_multiple_settings_single_config():
         assert "__cplusplus2020" in client.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.parametrize("multiconfig", [True, False])
 def test_cmake_presets_duplicated_install(multiconfig):
     # https://github.com/conan-io/conan/issues/11409
@@ -139,6 +141,7 @@ def test_cmake_presets_duplicated_install(multiconfig):
     assert len(contents["testPresets"]) == 1
 
 
+@pytest.mark.os_agnostic
 def test_remove_missing_presets():
     # https://github.com/conan-io/conan/issues/11413
     client = TestClient(path_with_spaces=False)
@@ -208,6 +211,7 @@ def test_cmake_presets_options_single_config():
             assert os.path.exists(path)
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake", "3.23")
 def test_cmake_presets_with_conanfile_txt():
     c = TestClient()
@@ -285,6 +289,7 @@ def test_cmake_presets_with_conanfile_txt_ninja():
     assert "Hello World Release!" in c.out
 
 
+@pytest.mark.os_agnostic
 def test_cmake_toolchain_custom_toolchain():
     client = TestClient(path_with_spaces=False)
     conanfile = GenConanfile().with_settings("os", "compiler", "build_type", "arch").\
@@ -571,6 +576,7 @@ class TestEnvironmentInPresets:
 
         yield c
 
+    @pytest.mark.os_agnostic
     def test_add_env_to_presets(self, _init_client):
         c = _init_client
 
@@ -680,6 +686,7 @@ class TestEnvironmentInPresets:
 
 class TestCMakeLayoutBuildFolder:
 
+    @pytest.mark.os_agnostic
     def test_build_folder_vars_empty(self):
         client = TestClient()
         conanfile = textwrap.dedent("""
@@ -701,6 +708,7 @@ class TestCMakeLayoutBuildFolder:
         presets = client.load("build/Debug/generators/CMakePresets.json")
         assert "conan-debug" in presets
 
+    @pytest.mark.os_agnostic
     def test_build_folder_vars_recipe_exclude_build_type(self):
         # Recipe opts in to folders/preset names without the build_type via "!settings.build_type"
         client = TestClient()
@@ -724,6 +732,7 @@ class TestCMakeLayoutBuildFolder:
         assert presets["configurePresets"][0]["name"] == "conan-default"
         assert presets["buildPresets"][0]["name"] == "conan-default"
 
+    @pytest.mark.os_agnostic
     def test_build_folder_vars_combinations(self):
         c = TestClient()
         c.run("new cmake_exe -d name=hello -d version=0.1")
@@ -773,6 +782,7 @@ class TestCMakeLayoutBuildFolder:
         assert presets["configurePresets"][0]["name"] == "conan-17-release"
         assert presets["buildPresets"][0]["name"] == "conan-17-release"
 
+    @pytest.mark.os_agnostic
     def test_build_folder_vars_exclude_build_type(self):
         # "!settings.build_type" opts out of the build_type folder segment and preset suffix
         c = TestClient()

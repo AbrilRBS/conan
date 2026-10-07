@@ -101,6 +101,7 @@ def test_objects_direct_consumer(client, targets):
     assert "Hello Objects!" in c.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake", "3.27")
 def test_objects_transitive_consumer(client):
     """ CMake only adds the objects of a target to the link line of its *direct* consumers, the

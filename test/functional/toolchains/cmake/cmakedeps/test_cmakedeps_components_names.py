@@ -253,6 +253,7 @@ def create_chat(client, components, package_info, cmake_find, test_cmake_find):
     assert "bye: Debug!" in client.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_standard_names(setup_client_with_greetings):
     client = setup_client_with_greetings
@@ -289,6 +290,7 @@ def test_standard_names(setup_client_with_greetings):
     create_chat(client, "standard", package_info, cmake_find, test_cmake_find)
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_custom_names(setup_client_with_greetings):
     client = setup_client_with_greetings
@@ -336,6 +338,7 @@ def test_custom_names(setup_client_with_greetings):
     create_chat(client, "custom", package_info, cmake_find, test_cmake_find)
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_different_namespace(setup_client_with_greetings):
     client = setup_client_with_greetings
@@ -381,6 +384,7 @@ def test_different_namespace(setup_client_with_greetings):
     create_chat(client, "custom", package_info, cmake_find, test_cmake_find)
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_no_components(setup_client_with_greetings):
     client = setup_client_with_greetings
@@ -419,6 +423,7 @@ def test_no_components(setup_client_with_greetings):
     create_chat(client, "none", package_info, cmake_find, test_cmake_find)
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_same_names():
     client = TestClient()
@@ -513,6 +518,7 @@ def test_same_names():
 @pytest.mark.tool("cmake")
 class TestComponentsCMakeGenerators:
 
+    @pytest.mark.os_agnostic
     def test_component_not_found(self):
         conanfile = textwrap.dedent("""
             from conan import ConanFile
@@ -541,6 +547,7 @@ class TestComponentsCMakeGenerators:
         assert ("Component 'greetings::non-existent' not found in 'greetings' "
                 "package requirement" in client.out)
 
+    @pytest.mark.os_agnostic
     def test_component_not_found_same_name_as_pkg_require(self):
         zlib = GenConanfile("zlib", "0.1").with_setting("build_type").with_generator("CMakeDeps")
         mypkg = GenConanfile("mypkg", "0.1").with_setting("build_type").with_generator("CMakeDeps")
@@ -726,6 +733,7 @@ class TestComponentsCMakeGenerators:
         assert 'variant/1.0: Hello World Release!' in client.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 @pytest.mark.parametrize("check_components_exist", [False, True, None])
 def test_targets_declared_in_build_modules(check_components_exist):
@@ -819,6 +827,7 @@ def test_targets_declared_in_build_modules(check_components_exist):
                                             in client.out)
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake")
 def test_cmakedeps_targets_no_namespace():
     """

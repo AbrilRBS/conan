@@ -1,5 +1,6 @@
 import contextlib
 import os
+import platform
 import shutil
 import textwrap
 
@@ -11,6 +12,18 @@ from conan.test.utils.env import environment_update
 from conan.test.utils.tools import TestClient
 from test.conftest import _get_tool
 from test.functional.utils import save_cache, client_from
+
+
+@pytest.hookimpl(tryfirst=True)  # Before the "-m" markers deselection
+def pytest_collection_modifyitems(items):
+    """
+    The "os_agnostic" tests are covered by the Linux and Windows CI runners, consider them slow
+    in macOS, so they run there only in the complete runs (develop2), not in every PR
+    """
+    if platform.system() == "Darwin":
+        for item in items:
+            if item.get_closest_marker("os_agnostic"):
+                item.add_marker(pytest.mark.slow)
 
 
 @pytest.fixture(scope="session")

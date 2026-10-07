@@ -9,6 +9,7 @@ from conan.test.utils.tools import TestClient
 
 class TestMesonToolchainAndGnuFlags:
 
+    @pytest.mark.os_agnostic
     @pytest.mark.tool("ninja")
     @pytest.mark.tool("meson")
     @pytest.mark.tool("pkg_config")

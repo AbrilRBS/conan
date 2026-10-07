@@ -540,6 +540,7 @@ def test_msvc_vs_versiontoolset():
 @pytest.mark.tool("cmake")
 class TestCMakeInstall:
 
+    @pytest.mark.os_agnostic
     def test_install(self):
         conanfile = textwrap.dedent("""
             from conan import ConanFile
@@ -578,6 +579,7 @@ class TestCMakeInstall:
         package_folder = client.created_layout().package()
         assert os.path.exists(os.path.join(package_folder, "include", "header.h"))
 
+    @pytest.mark.os_agnostic
     def test_install_in_build(self):
         """
         test that we can do a ``cmake.install()`` inside the ``build()`` method without
@@ -667,6 +669,7 @@ class TestCmakeTestMethod:
 @pytest.mark.tool("cmake")
 class TestCMakeOverrideCache:
 
+    @pytest.mark.os_agnostic
     def test_cmake_cache_variables(self):
         # https://github.com/conan-io/conan/issues/7832
         conanfile = textwrap.dedent("""
@@ -700,6 +703,7 @@ class TestCMakeOverrideCache:
 @pytest.mark.tool("cmake")
 class TestCMakeFindPackagePreferConfig:
 
+    @pytest.mark.os_agnostic
     def test_prefer_config(self):
         conanfile = textwrap.dedent("""
             from conan import ConanFile

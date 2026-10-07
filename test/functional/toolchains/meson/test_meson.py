@@ -202,6 +202,7 @@ class TestMesonToolchain:
         assert os.path.exists(os.path.join(package_folder, "res", "tutorial", "file2.txt"))
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("meson")
 @pytest.mark.skipif(sys.version_info.minor < 8, reason="Latest Meson versions needs Python >= 3.8")
 def test_meson_and_additional_machine_files_composition():

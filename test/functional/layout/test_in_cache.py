@@ -47,6 +47,7 @@ def conanfile():
     return conan_file
 
 
+@pytest.mark.os_agnostic
 def test_create_test_package_no_layout():
     """The test package using the new generators work (having the generated files in the build
     folder)"""
@@ -77,6 +78,7 @@ def test_create_test_package_no_layout():
     assert "hey! testing" in client.out
 
 
+@pytest.mark.os_agnostic
 def test_create_test_package_with_layout():
     """The test package using the new generators work (having the generated files in the build
     folder)"""
@@ -116,6 +118,7 @@ def test_create_test_package_with_layout():
     assert "hey! testing" in client.out
 
 
+@pytest.mark.os_agnostic
 def test_cache_in_layout(conanfile):
     """The layout in the cache is used too, always relative to the "base" folders that the cache
     requires. But by the default, the "package" is not followed
@@ -147,6 +150,7 @@ def test_cache_in_layout(conanfile):
     assert os.path.exists(os.path.join(pf, "conaninfo.txt"))
 
 
+@pytest.mark.os_agnostic
 def test_same_conanfile_local(conanfile):
     client = TestClient()
     client.save({"conanfile.py": GenConanfile()})
@@ -167,6 +171,7 @@ def test_same_conanfile_local(conanfile):
     assert os.path.exists(os.path.join(build_folder, "build.lib"))
 
 
+@pytest.mark.os_agnostic
 def test_cpp_package():
     client = TestClient()
 
@@ -220,6 +225,7 @@ def test_cpp_package():
     assert 'set(hello_LIBS_RELEASE foo)' in cmake
 
 
+@pytest.mark.os_agnostic
 def test_git_clone_with_source_layout():
     client = TestClient()
     repo = temp_folder()

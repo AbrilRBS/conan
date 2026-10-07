@@ -41,6 +41,7 @@ def _client_with_user_presets():
     return c
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake", "3.23")
 def test_cmake_presets_with_user_presets_file():
     """ Test the integration of the generated one with a user root CMakePresets.json
@@ -80,6 +81,7 @@ def test_cmake_presets_with_user_presets_file():
     assert "Hello World Release!" in c.out
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake", "3.23")
 def test_cmake_presets_build_preset_stub_needs_configure_preset():
     """Reproduce issue #19180: buildPresets stubs in ConanPresets.json must include
@@ -96,6 +98,7 @@ def test_cmake_presets_build_preset_stub_needs_configure_preset():
     assert "Invalid preset" not in c.out, f"cmake --list-presets failed: {c.out}"
 
 
+@pytest.mark.os_agnostic
 @pytest.mark.tool("cmake", "3.23")
 def test_cmake_presets_stubs_restored_after_build_folder_deleted():
     """Reproduce issue #19173: after deleting build/ and reinstalling one config,
