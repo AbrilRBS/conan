@@ -19,6 +19,8 @@ def test_autotools_lib_template():
     client.run("build .")
 
     client.run("export-pkg .")
+    # The test_package of export-pkg checks the static library, no need to "create" it too
+    assert "hello/0.1: Hello World Release!" in client.out
     pkg_layout = client.created_layout()
     package_folder = pkg_layout.package()
     assert os.path.exists(os.path.join(package_folder, "include", "hello.h"))
@@ -29,7 +31,7 @@ def test_autotools_lib_template():
     client.run("new autotools_lib -d name=hello -d version=0.1")
     client.run("install . -o hello/*:shared=True")
     client.run("build . -o hello/*:shared=True")
-    client.run("export-pkg . -o hello/*:shared=True")
+    client.run("export-pkg . -o hello/*:shared=True -tf=")
     pkg_layout = client.created_layout()
     package_folder = pkg_layout.package()
 
@@ -41,9 +43,6 @@ def test_autotools_lib_template():
         assert os.path.exists(os.path.join(package_folder, "lib", "libhello.so.0"))
 
     # Create works
-    client.run("create .")
-    assert "hello/0.1: Hello World Release!" in client.out
-
     client.run("create . -s build_type=Debug")
     assert "hello/0.1: Hello World Debug!" in client.out
 
@@ -52,13 +51,39 @@ def test_autotools_lib_template():
     client.run("new autotools_lib -d name=hello -d version=0.1")
     client.run("create . -o hello/*:shared=True")
     build_folder = client.created_test_build_folder("hello/0.1")
+    package_folder = client.created_layout().package()
     assert "hello/0.1: Hello World Release!" in client.out
     if platform.system() == "Darwin":
         client.run_command(f"otool -l test_package/{build_folder}/main")
         assert "@rpath/libhello.0.dylib" in client.out
+        _check_relocatable_libs_darwin(client, package_folder, build_folder)
     else:
         client.run_command(f"ldd test_package/{build_folder}/main")
         assert "libhello.so.0" in client.out
+
+
+def _check_relocatable_libs_darwin(client, package_folder, build_folder):
+    dylib = os.path.join(package_folder, "lib", "libhello.0.dylib")
+    client.run_command("otool -l {}".format(dylib))
+    assert "@rpath/libhello.0.dylib" in client.out
+    client.run_command("otool -l {}".format(f"test_package/{build_folder}/main"))
+    assert package_folder in client.out
+
+    # will work because rpath set
+    client.run_command(f"test_package/{build_folder}/main")
+    assert "hello/0.1: Hello World Release!" in client.out
+
+    # move to another location so that the path set in the rpath does not exist
+    # then the execution should fail
+    shutil.move(os.path.join(package_folder, "lib"), os.path.join(client.current_folder, "tempfolder"))
+    # will fail because rpath does not exist
+    client.run_command(f"test_package/{build_folder}/main", assert_error=True)
+    assert "Library not loaded: @rpath/libhello.0.dylib" in str(client.out).replace("'", "")
+
+    # Use DYLD_LIBRARY_PATH and should run
+    client.run_command("DYLD_LIBRARY_PATH={} test_package/{}/main".format(os.path.join(client.current_folder, "tempfolder"),
+                                                                          build_folder))
+    assert "hello/0.1: Hello World Release!" in client.out
 
 
 @pytest.mark.skipif(platform.system() not in ["Linux", "Darwin"], reason="Requires Autotools")
@@ -81,41 +106,6 @@ def test_autotools_exe_template():
     for flag in ["--enable-static", "--disable-static", "--disable-shared", "--with-pic"]:
         assert flag not in client.out
     assert "greet/0.1: Hello World Debug!" in client.out
-
-
-@pytest.mark.skipif(platform.system() not in ["Darwin"], reason="Requires Autotools")
-@pytest.mark.tool("autotools")
-def test_autotools_relocatable_libs_darwin():
-    client = TestClient(path_with_spaces=False)
-    client.run("new autotools_lib -d name=hello -d version=0.1")
-    client.run("create . -o hello/*:shared=True")
-
-    build_folder = client.created_test_build_folder("hello/0.1")
-    pkg_layout = client.created_layout()
-    package_folder = pkg_layout.package()
-
-    dylib = os.path.join(package_folder, "lib", "libhello.0.dylib")
-    if platform.system() == "Darwin":
-        client.run_command("otool -l {}".format(dylib))
-        assert "@rpath/libhello.0.dylib" in client.out
-        client.run_command("otool -l {}".format(f"test_package/{build_folder}/main"))
-        assert package_folder in client.out
-
-    # will work because rpath set
-    client.run_command(f"test_package/{build_folder}/main")
-    assert "hello/0.1: Hello World Release!" in client.out
-
-    # move to another location so that the path set in the rpath does not exist
-    # then the execution should fail
-    shutil.move(os.path.join(package_folder, "lib"), os.path.join(client.current_folder, "tempfolder"))
-    # will fail because rpath does not exist
-    client.run_command(f"test_package/{build_folder}/main", assert_error=True)
-    assert "Library not loaded: @rpath/libhello.0.dylib" in str(client.out).replace("'", "")
-
-    # Use DYLD_LIBRARY_PATH and should run
-    client.run_command("DYLD_LIBRARY_PATH={} test_package/{}/main".format(os.path.join(client.current_folder, "tempfolder"),
-                                                                          build_folder))
-    assert "hello/0.1: Hello World Release!" in client.out
 
 
 @pytest.mark.skipif(platform.system() not in ["Darwin"], reason="Requires Autotools")

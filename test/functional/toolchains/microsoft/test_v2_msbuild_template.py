@@ -18,15 +18,14 @@ def test_msbuild_lib_template():
 
     assert os.path.isfile(os.path.join(client.current_folder, "x64", "Release", "hello.lib"))
     client.run("export-pkg .")
+    # The test_package of export-pkg checks the Release library, no need to "create" it too
+    assert "hello/0.1: Hello World Release!" in client.out
+    assert "hello/0.1: _MSC_VER193" in client.out
     package_folder = client.created_layout().package()
     assert os.path.exists(os.path.join(package_folder, "include", "hello.h"))
     assert os.path.exists(os.path.join(package_folder, "lib", "hello.lib"))
 
     # Create works
-    client.run("create .")
-    assert "hello/0.1: Hello World Release!" in client.out
-    assert "hello/0.1: _MSC_VER193" in client.out
-
     client.run("create . -s build_type=Debug")
     assert "hello/0.1: Hello World Debug!" in client.out
 
@@ -49,12 +48,7 @@ def test_msbuild_lib_2022():
     # This is the default compiler.version=191 in conftest
     assert "Activating environment Visual Studio 17" in client.out
     assert "hello/0.1: _MSC_VER191" in client.out
-
-    # Create works
-    client.run("create . -s compiler.version=193")
-    assert "hello/0.1: Hello World Release!" in client.out
-    assert "Activating environment Visual Studio 17" in client.out
-    assert "hello/0.1: _MSC_VER193" in client.out
+    # compiler.version=193 is already checked in test_msbuild_lib_template
 
 
 @pytest.mark.tool("visual_studio", "17")

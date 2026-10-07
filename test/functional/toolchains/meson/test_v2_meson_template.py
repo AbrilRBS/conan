@@ -17,13 +17,12 @@ def test_meson_lib_template():
     client.run("install .")
     client.run("build .")
     client.run("export-pkg . --name=hello --version=0.1")
+    # The test_package of export-pkg checks the Release library, no need to "create" it too
+    assert "hello/0.1: Hello World Release!" in client.out
     package_folder = client.created_layout().package()
     assert os.path.exists(os.path.join(package_folder, "include", "hello.h"))
 
     # Create works
-    client.run("create .")
-    assert "hello/0.1: Hello World Release!" in client.out
-
     client.run("create . -s build_type=Debug")
     assert "hello/0.1: Hello World Debug!" in client.out
 
