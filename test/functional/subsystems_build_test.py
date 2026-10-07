@@ -11,6 +11,9 @@ from conan.test.utils.tools import TestClient
 from conan.test.utils.env import environment_update
 
 
+# These tests do not use Conan, they check the subsystems in the CI machines, so they are
+# considered slow, to run them only in the complete runs (develop2), not in every PR
+@pytest.mark.slow
 @pytest.mark.skipif(platform.system() != "Windows", reason="Tests Windows Subsystems")
 class TestSubsystems:
 
@@ -100,6 +103,7 @@ class TestSubsystemsBuild:
         client.run_command(make)
         client.run_command("app")
 
+    @pytest.mark.slow  # Not using Conan, checks the CI subsystems
     @pytest.mark.tool("msys2")
     @pytest.mark.parametrize("static", [True, False])
     def test_msys2(self, static):
@@ -118,6 +122,7 @@ class TestSubsystemsBuild:
         check_vs_runtime("app.exe", client, "15", "Debug", static_runtime=static,
                          subsystem="msys2")
 
+    @pytest.mark.slow  # Not using Conan, checks the CI subsystems
     @pytest.mark.parametrize("static", [True, False])
     @pytest.mark.tool("msys2")
     @pytest.mark.tool("mingw64")
@@ -136,6 +141,7 @@ class TestSubsystemsBuild:
         check_vs_runtime("app.exe", client, "15", "Debug", static_runtime=static,
                          subsystem="mingw64")
 
+    @pytest.mark.slow  # Not using Conan, checks the CI subsystems
     @pytest.mark.parametrize("static", [True, False])
     @pytest.mark.tool("msys2")
     @pytest.mark.tool("msys2_clang64")
@@ -236,6 +242,7 @@ class TestSubsystemsBuild:
         check_vs_runtime("app.exe", client, "15", "Debug", static_runtime=static,
                          subsystem="mingw64")
 
+    @pytest.mark.slow  # Not using Conan, checks the CI subsystems
     @pytest.mark.parametrize("static", [True, False])
     @pytest.mark.tool("msys2")
     @pytest.mark.tool("mingw32")
@@ -254,6 +261,7 @@ class TestSubsystemsBuild:
         check_vs_runtime("app.exe", client, "15", "Debug", static_runtime=static,
                          subsystem="mingw32")
 
+    @pytest.mark.slow  # Not using Conan, checks the CI subsystems
     @pytest.mark.parametrize("static", [True, False])
     @pytest.mark.tool("msys2")
     @pytest.mark.tool("ucrt64")
@@ -269,6 +277,7 @@ class TestSubsystemsBuild:
         check_vs_runtime("app.exe", client, "15", "Debug", static_runtime=static,
                          subsystem="ucrt64")
 
+    @pytest.mark.slow  # Not using Conan, checks the CI subsystems
     @pytest.mark.parametrize("static", [True, False])
     @pytest.mark.tool("cygwin")
     def test_cygwin(self, static):
@@ -283,6 +292,9 @@ class TestSubsystemsBuild:
                          subsystem="cygwin")
 
 
+# These tests do not use Conan, they check the subsystems in the CI machines, so they are
+# considered slow, to run them only in the complete runs (develop2), not in every PR
+@pytest.mark.slow
 @pytest.mark.skipif(platform.system() != "Windows", reason="Tests Windows Subsystems")
 class TestSubsystemsAutotoolsBuild:
     configure_ac = textwrap.dedent("""
@@ -359,6 +371,9 @@ class TestSubsystemsAutotoolsBuild:
         check_vs_runtime("app.exe", client, "15", "Debug", subsystem="cygwin")
 
 
+# These tests do not use Conan, they check the subsystems in the CI machines, so they are
+# considered slow, to run them only in the complete runs (develop2), not in every PR
+@pytest.mark.slow
 @pytest.mark.skipif(platform.system() != "Windows", reason="Tests Windows Subsystems")
 class TestSubsystemsCMakeBuild:
     """ These tests are running the CMake INSIDE THE subsystem, not the Windows native one
@@ -446,7 +461,6 @@ class TestSubsystemsCMakeBuild:
                       subsystem="mingw64")
         check_vs_runtime("app.exe", client, "15", "Debug", subsystem="clang64")
 
-    @pytest.mark.slow
     @pytest.mark.tool("msys2")
     @pytest.mark.tool("msys2_mingw64_clang64")
     def test_msys2_mingw64_clang64(self):
