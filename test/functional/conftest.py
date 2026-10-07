@@ -1,106 +1,181 @@
+import contextlib
 import os
 import shutil
 import textwrap
 
+import fasteners
 import pytest
 
 from conan.test.assets.sources import gen_function_h, gen_function_cpp
+from conan.test.utils.env import environment_update
 from conan.test.utils.test_files import temp_folder
 from conan.test.utils.tools import TestClient
+from test.conftest import _get_tool
 
 
 @pytest.fixture(scope="session")
-def _matrix_client():
+def build_once(tmp_path_factory):
+    """
+    Session fixtures run once per pytest-xdist worker, so every worker would build the same
+    packages again. Build them once per test session instead, sharing the result between the
+    workers. If other worker is building it right now, build it locally instead of waiting idle.
+    The returned folder can be shared by all the tests, it must not be modified, use copies of it.
+    """
+    worker_root = str(tmp_path_factory.getbasetemp())
+    shared_root = worker_root
+    if os.getenv("PYTEST_XDIST_WORKER"):
+        shared_root = os.path.dirname(worker_root)  # Common to all the workers of this session
+    shared_root = os.path.join(shared_root, "build_once")
+    os.makedirs(shared_root, exist_ok=True)
+
+    def _build(build, folder):
+        tmp_folder = folder + ".tmp"
+        shutil.rmtree(tmp_folder, ignore_errors=True)  # From a previous failed build
+        with _default_cmake():
+            build(tmp_folder)
+        os.rename(tmp_folder, folder)
+
+    def _build_once(name, build):
+        folder = os.path.join(shared_root, name)
+        if os.path.exists(folder):
+            return folder
+        lock = fasteners.InterProcessLock(folder + ".lock")
+        if lock.acquire(blocking=False):
+            try:
+                if not os.path.exists(folder):
+                    _build(build, folder)
+            finally:
+                lock.release()
+            return folder
+        # Other worker is building it, do not wait for it
+        folder = os.path.join(worker_root, "build_once", name)
+        _build(build, folder)
+        return folder
+    return _build_once
+
+
+def _default_cmake():
+    """ build always with the default CMake, not with the version in the PATH of the test that
+    happens to need the shared packages first
+    """
+    cmake_path = _get_tool("cmake", None)
+    if not isinstance(cmake_path, str):  # Not available, leave the PATH untouched
+        return contextlib.nullcontext()
+    return environment_update({"PATH": cmake_path + os.pathsep + os.environ["PATH"]})
+
+
+def _save_cache(client, folder):
+    """ save the client cache, without the build and source folders, which are not needed to
+    consume the packages, so copying it is faster
+    """
+    client.run('cache clean "*"')
+    shutil.copytree(client.cache_folder, os.path.join(folder, ".conan2"))
+
+
+def _client_from(folder, path_with_spaces=True):
+    """ a new client using a copy of the cache saved with _save_cache() in folder
+    """
+    c = TestClient(path_with_spaces=path_with_spaces)
+    c.cache_folder = os.path.join(temp_folder(path_with_spaces=path_with_spaces), ".conan2")
+    shutil.copytree(os.path.join(folder, ".conan2"), c.cache_folder)
+    return c
+
+
+@pytest.fixture(scope="session")
+def _matrix(build_once):
     """
     matrix/1.0, just static, no test_package
     """
-    c = TestClient()
-    c.run("new cmake_lib -d name=matrix -d version=1.0")
-    c.run("create . -tf=")
-    return c
+    def build(folder):
+        c = TestClient()
+        c.run("new cmake_lib -d name=matrix -d version=1.0")
+        c.run("create . -tf=")
+        _save_cache(c, folder)
+    return build_once("matrix", build)
+
+
+def _add_matrix_binaries(build_once, name, base, args):
+    def build(folder):
+        c = _client_from(base)
+        c.run("new cmake_lib -d name=matrix -d version=1.0")
+        c.run(f"create . {args} -tf=")
+        _save_cache(c, folder)
+    return build_once(name, build)
 
 
 @pytest.fixture(scope="session")
-def _matrix_client_shared(_matrix_client):
-    _matrix_client.run("create . -o *:shared=True -tf=")
-    return _matrix_client
+def _matrix_shared(build_once, _matrix):
+    """ matrix/1.0 static and shared """
+    return _add_matrix_binaries(build_once, "matrix_shared", _matrix, "-o *:shared=True")
 
 
 @pytest.fixture(scope="session")
-def _matrix_client_debug(_matrix_client):
-    _matrix_client.run("create . -s build_type=Debug -tf=")
-    return _matrix_client
-
-
-@pytest.fixture()
-def matrix_client(_matrix_client):
-    c = TestClient()
-    c.cache_folder = os.path.join(temp_folder(), ".conan2")
-    shutil.copytree(_matrix_client.cache_folder, c.cache_folder)
-    return c
-
-
-@pytest.fixture()
-def matrix_client_nospace(_matrix_client):
-    c = TestClient(path_with_spaces=False)
-    c.cache_folder = os.path.join(temp_folder(path_with_spaces=False), ".conan2")
-    shutil.copytree(_matrix_client.cache_folder, c.cache_folder)
-    return c
-
-
-@pytest.fixture()
-def matrix_client_shared(_matrix_client_shared):
-    c = TestClient()
-    c.cache_folder = os.path.join(temp_folder(), ".conan2")
-    shutil.copytree(_matrix_client_shared.cache_folder, c.cache_folder)
-    return c
-
-
-@pytest.fixture()
-def matrix_client_shared_debug(_matrix_client_shared, _matrix_client_debug):
-    c = TestClient()
-    c.cache_folder = os.path.join(temp_folder(), ".conan2")
-    shutil.copytree(_matrix_client_shared.cache_folder, c.cache_folder)
-    return c
-
-
-@pytest.fixture()
-def matrix_client_debug(_matrix_client_debug):
-    c = TestClient()
-    c.cache_folder = os.path.join(temp_folder(), ".conan2")
-    shutil.copytree(_matrix_client_debug.cache_folder, c.cache_folder)
-    return c
+def _matrix_debug(build_once, _matrix):
+    """ matrix/1.0 static Release and Debug """
+    return _add_matrix_binaries(build_once, "matrix_debug", _matrix, "-s build_type=Debug")
 
 
 @pytest.fixture(scope="session")
-def _transitive_libraries(_matrix_client):
+def _matrix_shared_debug(build_once, _matrix_shared):
+    """ matrix/1.0 static and shared Release, static Debug """
+    return _add_matrix_binaries(build_once, "matrix_shared_debug", _matrix_shared,
+                                "-s build_type=Debug")
+
+
+@pytest.fixture()
+def matrix_client(_matrix):
+    return _client_from(_matrix)
+
+
+@pytest.fixture()
+def matrix_client_nospace(_matrix):
+    return _client_from(_matrix, path_with_spaces=False)
+
+
+@pytest.fixture()
+def matrix_client_shared(_matrix_shared):
+    return _client_from(_matrix_shared)
+
+
+@pytest.fixture()
+def matrix_client_shared_debug(_matrix_shared_debug):
+    return _client_from(_matrix_shared_debug)
+
+
+@pytest.fixture()
+def matrix_client_debug(_matrix_debug):
+    return _client_from(_matrix_debug)
+
+
+@pytest.fixture(scope="session")
+def _transitive_libraries(build_once, _matrix):
     """
-    engine/1.0->matrix/1.0
+    engine/1.0->matrix/1.0, engine static and shared, matrix static
     """
-    c = TestClient()
-    c.cache_folder = os.path.join(temp_folder(), ".conan2")
-    shutil.copytree(_matrix_client.cache_folder, c.cache_folder)
-    c.save({}, clean_first=True)
-    c.run("new cmake_lib -d name=engine -d version=1.0 -d requires=matrix/1.0")
-    # create both static and shared
-    c.run("create . -tf=")
-    c.run("create . -o engine/*:shared=True -tf=")
-    return c
+    def build(folder):
+        c = _client_from(_matrix)
+        c.run("new cmake_lib -d name=engine -d version=1.0 -d requires=matrix/1.0")
+        # create both static and shared
+        c.run("create . -tf=")
+        c.run("create . -o engine/*:shared=True -tf=")
+        _save_cache(c, folder)
+    return build_once("transitive_libraries", build)
 
 
 @pytest.fixture()
 def transitive_libraries(_transitive_libraries):
-    c = TestClient()
-    c.cache_folder = os.path.join(temp_folder(), ".conan2")
-    shutil.copytree(_transitive_libraries.cache_folder, c.cache_folder)
-    return c
+    return _client_from(_transitive_libraries)
 
 
 @pytest.fixture(scope="session")
-def _matrix_client_components():
+def _matrix_client_components(build_once):
     """
     2 components, different than the package name
     """
+    return build_once("matrix_components", _build_matrix_components)
+
+
+def _build_matrix_components(folder):
     c = TestClient()
     headers_h = textwrap.dedent("""
         #include <iostream>
@@ -190,19 +265,20 @@ def _matrix_client_components():
             "CMakeLists.txt": cmakelists,
             "conanfile.py": conanfile})
     c.run("create .")
-    return c
+    _save_cache(c, folder)
 
 
 @pytest.fixture()
 def matrix_client_components(_matrix_client_components):
-    c = TestClient()
-    c.cache_folder = os.path.join(temp_folder(), ".conan2")
-    shutil.copytree(_matrix_client_components.cache_folder, c.cache_folder)
-    return c
+    return _client_from(_matrix_client_components)
 
 
 @pytest.fixture(scope="session")
-def _matrix_c_interface_client():
+def _matrix_c_interface_client(build_once):
+    return build_once("matrix_c_interface", _build_matrix_c_interface)
+
+
+def _build_matrix_c_interface(folder):
     c = TestClient()
     matrix_h = textwrap.dedent("""\
         #pragma once
@@ -272,12 +348,9 @@ def _matrix_c_interface_client():
             "conanfile.py": conanfile,
             "CMakeLists.txt": cmake})
     c.run("create .")
-    return c
+    _save_cache(c, folder)
 
 
 @pytest.fixture()
 def matrix_c_interface_client(_matrix_c_interface_client):
-    c = TestClient()
-    c.cache_folder = os.path.join(temp_folder(), ".conan2")
-    shutil.copytree(_matrix_c_interface_client.cache_folder, c.cache_folder)
-    return c
+    return _client_from(_matrix_c_interface_client)
