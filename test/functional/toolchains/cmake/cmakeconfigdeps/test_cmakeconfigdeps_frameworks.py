@@ -4,7 +4,6 @@ import textwrap
 import pytest
 
 from conan.internal.model.pkg_type import PackageType
-from conan.test.utils.tools import TestClient
 
 new_value = "will_break_next"
 
@@ -12,20 +11,18 @@ new_value = "will_break_next"
 @pytest.mark.parametrize("shared", [True, False])
 @pytest.mark.tool("cmake", "3.27")
 @pytest.mark.skipif(platform.system() != "Darwin", reason="Only OSX")
-def test_osx_frameworks(shared):
+def test_osx_frameworks(shared, request):
     """
     Testing custom package frameworks + system frameworks + requirements
     """
-    client = TestClient()
-    client.run("new cmake_lib -d name=dep -d version=1.0")
-    client.run(f"create . -tf='' -o '&:shared={shared}'")
+    client = request.getfixturevalue("matrix_client_shared" if shared else "matrix_client")
     cmakelists = textwrap.dedent("""
     set(CMAKE_CXX_COMPILER_WORKS 1)
     set(CMAKE_CXX_ABI_COMPILED 1)
     cmake_minimum_required(VERSION 3.15)
     project(MyFramework CXX)
 
-    find_package(dep CONFIG REQUIRED)
+    find_package(matrix CONFIG REQUIRED)
 
     add_library(MyFramework frame.cpp frame.h)
 
@@ -35,7 +32,7 @@ def test_osx_frameworks(shared):
       MACOSX_FRAMEWORK_IDENTIFIER MyFramework
       PUBLIC_HEADER frame.h
     )
-    target_link_libraries(MyFramework PRIVATE dep::dep)
+    target_link_libraries(MyFramework PRIVATE matrix::matrix)
 
     if(BUILD_SHARED_LIBS)
         target_link_libraries(MyFramework PRIVATE "-framework CoreFoundation")
@@ -46,7 +43,7 @@ def test_osx_frameworks(shared):
     """)
     frame_cpp = textwrap.dedent("""
     #include "frame.h"
-    #include "dep.h"
+    #include "matrix.h"
     #include <iostream>
     #include <CoreFoundation/CoreFoundation.h>
 
@@ -61,8 +58,8 @@ def test_osx_frameworks(shared):
         // MyFramework
         std::cout << "Hello from MyFramework!" << std::endl;
 
-        // dep requirement
-        dep();
+        // matrix requirement
+        matrix();
     }
     """)
     frame_h = textwrap.dedent("""
@@ -85,7 +82,7 @@ def test_osx_frameworks(shared):
         default_options = {{"shared": False, "fPIC": True}}
         exports_sources = "frame.cpp", "frame.h", "CMakeLists.txt"
         generators = "CMakeToolchain", "CMakeConfigDeps"
-        requires = "dep/1.0"
+        requires = "matrix/1.0"
 
         def config_options(self):
             if self.settings.os == "Windows":
@@ -163,4 +160,4 @@ def test_osx_frameworks(shared):
     }, clean_first=True)
     client.run(f"create . -c tools.cmake.cmakedeps:new={new_value} -o '*:shared={shared}'")
     assert "Hello from MyFramework!" in client.out
-    assert "dep/1.0: Hello World" in client.out
+    assert "matrix/1.0: Hello World" in client.out

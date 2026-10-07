@@ -86,7 +86,7 @@ def test_zlib_not_included(client):
     assert not os.path.exists(os.path.join(client.current_folder, "zlib-config.cmake"))
 
 
-def test_error_cmakedeps_transitive_build_requires():
+def test_error_cmakedeps_transitive_build_requires(transitive_libraries):
     """
     CMakeDeps when building an intermediate "tool_requires" that has a normal "requires"
     to other package, needs to use ``require.build`` trait instead of the more global
@@ -94,16 +94,10 @@ def test_error_cmakedeps_transitive_build_requires():
     We do build "protobuf" in the "build" context to make sure the whole CMakeDeps is
     working correctly
     """
-    c = TestClient()
-    c.run("new cmake_lib -d name=zlib -d version=0.1")
-    c.run("create . -tf=")
-    c.save({}, clean_first=True)
-    c.run("new cmake_lib -d name=openssl -d version=0.1 -d requires=zlib/0.1")
-    c.run("create . -tf=")
+    c = transitive_libraries  # engine/1.0 -> matrix/1.0
 
     # Protobuf binary is missing, to force a build below with ``--build=missing``
-    c.save({}, clean_first=True)
-    c.run("new cmake_exe -d name=protobuf -d version=0.1 -d requires=openssl/0.1")
+    c.run("new cmake_exe -d name=protobuf -d version=0.1 -d requires=engine/1.0")
     c.run("export .")
 
     # This conanfile used to fail, creating protobuf_mybuild*.cmake files even if for "tool" the

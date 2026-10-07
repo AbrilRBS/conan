@@ -2,7 +2,6 @@ import pytest
 import textwrap
 
 from conan.test.assets.sources import gen_function_cpp
-from conan.test.utils.tools import TestClient
 from test.functional.toolchains.meson._base import check_binary
 
 
@@ -12,8 +11,8 @@ from test.functional.toolchains.meson._base import check_binary
 class TestMeson:
     _test_package_meson_build = textwrap.dedent("""
         project('test_package', 'cpp')
-        hello = dependency('hello', version : '>=0.1')
-        test_package = executable('test_package', 'test_package.cpp', dependencies: hello)
+        matrix = dependency('matrix', version : '>=1.0')
+        test_package = executable('test_package', 'test_package.cpp', dependencies: matrix)
         test('test package', test_package)
         """)
 
@@ -48,16 +47,15 @@ class TestMeson:
                 meson.test()
         """)
 
-    def test_reuse(self):
-        t = TestClient()
-        t.run("new cmake_lib -d name=hello -d version=0.1")
+    def test_reuse(self, matrix_client):
+        t = matrix_client  # matrix/1.0 static library, only its Meson test_package is built
 
-        test_package_cpp = gen_function_cpp(name="main", includes=["hello"], calls=["hello"])
+        test_package_cpp = gen_function_cpp(name="main", includes=["matrix"], calls=["matrix"])
 
         t.save({"test_package/conanfile.py": self._test_package_conanfile_py,
                 "test_package/meson.build": self._test_package_meson_build,
                 "test_package/test_package.cpp": test_package_cpp})
 
-        t.run("create . --name=hello --version=0.1")
+        t.run("test test_package matrix/1.0")
 
         check_binary(t)

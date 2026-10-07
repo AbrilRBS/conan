@@ -3,7 +3,6 @@ import textwrap
 import pytest
 
 from conan.test.assets.sources import gen_function_cpp
-from conan.test.utils.tools import TestClient
 
 
 @pytest.mark.tool("cmake")
@@ -68,14 +67,13 @@ def test_cmake_virtualenv(matrix_client):
 
 
 @pytest.mark.tool("cmake")
-def test_complete():
-    client = TestClient()
-    client.run("new cmake_lib -d name=myopenssl -d version=1.0")
-    client.run("create . -o myopenssl/*:shared=True")
-    client.run("create . -o myopenssl/*:shared=True -s build_type=Debug")
+def test_complete(matrix_client_shared):
+    client = matrix_client_shared  # matrix/1.0 shared Release, add the shared Debug one
+    client.run("new cmake_lib -d name=matrix -d version=1.0")
+    client.run("create . -o matrix/*:shared=True -s build_type=Debug -tf=")
 
     mycmake_main = gen_function_cpp(name="main", msg="mycmake",
-                                    includes=["myopenssl"], calls=["myopenssl"])
+                                    includes=["matrix"], calls=["matrix"])
     mycmake_conanfile = textwrap.dedent("""
         import os
         from conan import ConanFile
@@ -83,8 +81,8 @@ def test_complete():
         from conan.tools.files import copy
         class App(ConanFile):
             settings = "os", "arch", "compiler", "build_type"
-            requires = "myopenssl/1.0"
-            default_options = {"myopenssl:shared": True}
+            requires = "matrix/1.0"
+            default_options = {"matrix:shared": True}
             generators = "CMakeDeps", "CMakeToolchain", "VirtualBuildEnv"
             exports_sources = "*"
 
@@ -107,23 +105,23 @@ def test_complete():
         cmake_minimum_required(VERSION 3.15)
         project(MyCmake CXX)
 
-        find_package(myopenssl REQUIRED)
+        find_package(matrix REQUIRED)
         add_executable(mycmake main.cpp)
-        target_link_libraries(mycmake PRIVATE myopenssl::myopenssl)
+        target_link_libraries(mycmake PRIVATE matrix::matrix)
         """)
     client.save({"conanfile.py": mycmake_conanfile,
                  "CMakeLists.txt": mycmake_cmakelists,
                  "main.cpp": mycmake_main}, clean_first=True)
     client.run("create . --name=mycmake --version=1.0", assert_error=True)
-    assert "The usage of package names `myopenssl:shared` in options is deprecated, " \
-           "use a pattern like `myopenssl/*:shared` instead" in client.out
+    assert "The usage of package names `matrix:shared` in options is deprecated, " \
+           "use a pattern like `matrix/*:shared` instead" in client.out
 
     client.run("create . --name=mycmake --version=1.0 -o=:shared=True", assert_error=True)
     assert "Invalid empty package" in client.out
 
     # Fix the default options and repeat the create
-    fixed_cf = mycmake_conanfile.replace('default_options = {"myopenssl:shared": True}',
-                                         'default_options = {"myopenssl*:shared": True}')
+    fixed_cf = mycmake_conanfile.replace('default_options = {"matrix:shared": True}',
+                                         'default_options = {"matrix*:shared": True}')
     client.save({"conanfile.py": fixed_cf})
     client.run("create . --name=mycmake --version=1.0")
 
@@ -134,8 +132,8 @@ def test_complete():
         class Pkg(ConanFile):
             settings = "os", "compiler", "build_type", "arch"
             build_requires = "mycmake/1.0"
-            requires = "myopenssl/1.0"
-            default_options = {"myopenssl/*:shared": True}
+            requires = "matrix/1.0"
+            default_options = {"matrix/*:shared": True}
             exports_sources = "CMakeLists.txt", "main.cpp"
             generators = "CMakeDeps", "CMakeToolchain"
 
@@ -158,21 +156,21 @@ def test_complete():
         cmake_minimum_required(VERSION 3.15)
         project(MyApp CXX)
 
-        find_package(myopenssl)
+        find_package(matrix)
         add_executable(myapp main.cpp)
-        target_link_libraries(myapp myopenssl::myopenssl)
+        target_link_libraries(myapp matrix::matrix)
         """)
 
     client.save({"conanfile.py": mylib,
-                 "main.cpp": gen_function_cpp(name="main", msg="myapp", includes=["myopenssl"],
-                                              calls=["myopenssl"]),
+                 "main.cpp": gen_function_cpp(name="main", msg="myapp", includes=["matrix"],
+                                              calls=["matrix"]),
                  "CMakeLists.txt": cmakelists},
                 clean_first=True)
 
     client.run("create . --name=myapp --version=0.1 -s:b build_type=Release -s:h build_type=Debug")
     first, last = str(client.out).split("RUNNING MYAPP")
     assert "mycmake: Release!" in first
-    assert "myopenssl/1.0: Hello World Release!" in first
+    assert "matrix/1.0: Hello World Release!" in first
 
     assert "myapp: Debug!" in last
-    assert "myopenssl/1.0: Hello World Debug!" in last
+    assert "matrix/1.0: Hello World Debug!" in last
