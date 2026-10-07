@@ -65,12 +65,13 @@ def editable_cmake(generator, build_folder=None):
     with c.chdir("pkg"):
         build_pkg("MEGADEP/0.1", build_editable=True)
 
-    # Check that create is still possible
-    c.run("editable remove dep")
-    c.run("create dep")
-    c.run("create pkg")
-    # print(c.out)
-    assert "Created package" in c.out
+    if generator is None and build_folder is None:
+        # Check that create is still possible, only once per platform, it doesn't depend on the
+        # generator or the editable folders
+        c.run("editable remove dep")
+        c.run("create dep -tf=")
+        c.run("create pkg")
+        assert "Created package" in c.out
 
 
 @pytest.mark.skipif(platform.system() != "Windows", reason="Only windows")
@@ -80,21 +81,24 @@ def test_editable_cmake_windows(generator):
     editable_cmake(generator)
 
 
+@pytest.mark.skipif(platform.system() != "Linux", reason="Output folders are not OS specific")
 @pytest.mark.tool("cmake")
-def test_editable_cmake_windows_folders():
+def test_editable_cmake_output_folder():
     build_folder = temp_folder()
     editable_cmake(generator=None, build_folder=build_folder)
 
 
+# Ninja is not tested, it is a single-config generator, like the default Makefiles
 @pytest.mark.skipif(platform.system() != "Linux", reason="Only linux")
-@pytest.mark.parametrize("generator", [None, "Ninja", "Ninja Multi-Config"])
+@pytest.mark.parametrize("generator", [None, "Ninja Multi-Config"])
 @pytest.mark.tool("cmake", "3.23")
 def test_editable_cmake_linux(generator):
     editable_cmake(generator)
 
 
+# Xcode is a multi-config generator as Ninja Multi-Config and Visual Studio, and it is very slow
 @pytest.mark.skipif(platform.system() != "Darwin", reason="Requires Macos")
-@pytest.mark.parametrize("generator", [None, "Ninja", "Xcode"])
+@pytest.mark.parametrize("generator", [None, pytest.param("Xcode", marks=pytest.mark.slow)])
 @pytest.mark.tool("cmake", "3.23")
 def test_editable_cmake_osx(generator):
     editable_cmake(generator)
@@ -150,14 +154,14 @@ def test_editable_cmake_windows_exe(generator):
 
 
 @pytest.mark.skipif(platform.system() != "Linux", reason="Only linux")
-@pytest.mark.parametrize("generator", [None, "Ninja", "Ninja Multi-Config"])
+@pytest.mark.parametrize("generator", [None, "Ninja Multi-Config"])
 @pytest.mark.tool("cmake", "3.23")
 def test_editable_cmake_linux_exe(generator):
     editable_cmake_exe(generator)
 
 
 @pytest.mark.skipif(platform.system() != "Darwin", reason="Requires Macos")
-@pytest.mark.parametrize("generator", [None, "Ninja", "Xcode"])
+@pytest.mark.parametrize("generator", [None, pytest.param("Xcode", marks=pytest.mark.slow)])
 @pytest.mark.tool("cmake", "3.23")
 def test_editable_cmake_osx_exe(generator):
     editable_cmake_exe(generator)

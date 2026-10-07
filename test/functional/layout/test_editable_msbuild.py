@@ -60,7 +60,7 @@ def test_editable_msbuild():
 
     # Check that create is still possible
     c.run("editable remove dep")
-    c.run("create dep")
+    c.run("create dep -tf=")
     c.run("create pkg")
     # print(c.out)
     assert "Created package" in c.out
