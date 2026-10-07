@@ -153,7 +153,7 @@ def _build_greetings(folder):
     save_cache(client, folder)
 
 
-def create_chat(client, components, package_info, cmake_find, test_cmake_find):
+def create_chat(client, components, package_info, cmake_find, test_cmake_find, debug=False):
     conanfile = textwrap.dedent("""
         from os.path import join
         from conan import ConanFile
@@ -246,11 +246,12 @@ def create_chat(client, components, package_info, cmake_find, test_cmake_find):
     assert "sayhello: Release!" in client.out
     assert "hello: Release!" in client.out
     assert "bye: Release!" in client.out
-    client.run("create . -s build_type=Debug")
-    assert "sayhellobye: Debug!" in client.out
-    assert "sayhello: Debug!" in client.out
-    assert "hello: Debug!" in client.out
-    assert "bye: Debug!" in client.out
+    if debug:  # Debug is not affected by the components names, check it only once
+        client.run("create . -s build_type=Debug")
+        assert "sayhellobye: Debug!" in client.out
+        assert "sayhello: Debug!" in client.out
+        assert "hello: Debug!" in client.out
+        assert "bye: Debug!" in client.out
 
 
 @pytest.mark.os_agnostic
@@ -287,7 +288,7 @@ def test_standard_names(setup_client_with_greetings):
         target_link_libraries(example2 chat::chat)
         """)
 
-    create_chat(client, "standard", package_info, cmake_find, test_cmake_find)
+    create_chat(client, "standard", package_info, cmake_find, test_cmake_find, debug=True)
 
 
 @pytest.mark.os_agnostic
