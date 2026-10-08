@@ -197,6 +197,33 @@ class TestImportModuleLoader:
         with pytest.raises(ConanException, match="Unable to load conanfile in"):
             self._create_and_load(myfunc1, value1, "conans", add_subdir_init)
 
+    @pytest.mark.parametrize("add_subdir_init", [True, False])
+    def test_failed_load_does_not_leak_local_modules(self, add_subdir_init):
+        # A conanfile failing after importing its local modules shouldn't leave them in
+        # sys.modules, shadowing the same-named local modules of the next loaded conanfile
+        conanfile = textwrap.dedent("""
+            import myhelper
+            from myhelperpkg.api import pkg_value
+            {fail}
+            values = myhelper.value, pkg_value
+            """)
+
+        def create(value, fail):
+            tmp = temp_folder()
+            save(os.path.join(tmp, "conanfile.py"), conanfile.format(fail=fail))
+            save(os.path.join(tmp, "myhelper.py"), f"value = '{value}'")
+            save(os.path.join(tmp, "myhelperpkg", "api.py"), f"pkg_value = '{value}'")
+            if add_subdir_init:
+                save(os.path.join(tmp, "myhelperpkg", "__init__.py"), "")
+            return os.path.join(tmp, "conanfile.py")
+
+        with pytest.raises(ConanException, match="Unable to load conanfile in"):
+            load_python_file(create("failed", fail="import does_not_exist"))
+        assert not {"myhelper", "myhelperpkg", "myhelperpkg.api"}.intersection(sys.modules)
+
+        loaded, _ = load_python_file(create("ok", fail=""))
+        assert loaded.values == ("ok", "ok")
+
     def test_helpers_python_library(self):
         mylogger = """
 value = ""

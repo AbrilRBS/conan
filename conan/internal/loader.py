@@ -344,8 +344,8 @@ def _load_python_file(conan_file_path):
     module_id = str(uuid.uuid1())
     current_dir = os.path.dirname(conan_file_path)
     sys.path.insert(0, current_dir)
+    old_modules = list(sys.modules.keys())
     try:
-        old_modules = list(sys.modules.keys())
         with chdir(current_dir):
             old_dont_write_bytecode = sys.dont_write_bytecode
             try:
@@ -363,9 +363,17 @@ def _load_python_file(conan_file_path):
             required_conan_version = getattr(loaded, "required_conan_version", None)
             if required_conan_version:
                 validate_conan_version(required_conan_version)
-
+    except ConanException:
+        raise
+    except Exception:
+        trace = traceback.format_exc().split('\n')
+        raise ConanException("Unable to load conanfile in %s\n%s" % (conan_file_path,
+                                                                     '\n'.join(trace[3:])))
+    finally:
+        sys.path.pop(0)
         # These lines are necessary, otherwise local conanfile imports with same name
         # collide, but no error, and overwrite other packages imports!!
+        # Also when loading fails, otherwise the next conanfile would get these modules
         added_modules = set(sys.modules).difference(old_modules)
         for added in added_modules:
             module = sys.modules[added]
@@ -385,14 +393,6 @@ def _load_python_file(conan_file_path):
                         module = sys.modules.pop(added)
                         module.print = new_print
                         sys.modules["%s.%s" % (module_id, added)] = module
-    except ConanException:
-        raise
-    except Exception:
-        trace = traceback.format_exc().split('\n')
-        raise ConanException("Unable to load conanfile in %s\n%s" % (conan_file_path,
-                                                                     '\n'.join(trace[3:])))
-    finally:
-        sys.path.pop(0)
 
     loaded.print = new_print
     return loaded, module_id
