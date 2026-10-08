@@ -353,12 +353,13 @@ def _load_python_file(conan_file_path):
                 spec = imp_util.spec_from_file_location(module_id, conan_file_path)
                 loaded = imp_util.module_from_spec(spec)
                 spec.loader.exec_module(loaded)
-                sys.dont_write_bytecode = old_dont_write_bytecode
             except ImportError:
                 version_txt = _get_required_conan_version_without_loading(conan_file_path)
                 if version_txt:
                     validate_conan_version(version_txt)
                 raise
+            finally:
+                sys.dont_write_bytecode = old_dont_write_bytecode
 
             required_conan_version = getattr(loaded, "required_conan_version", None)
             if required_conan_version:

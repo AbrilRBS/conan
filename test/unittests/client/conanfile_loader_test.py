@@ -224,6 +224,14 @@ class TestImportModuleLoader:
         loaded, _ = load_python_file(create("ok", fail=""))
         assert loaded.values == ("ok", "ok")
 
+    def test_failed_load_restores_dont_write_bytecode(self, monkeypatch):
+        monkeypatch.setattr(sys, "dont_write_bytecode", False)
+        tmp = temp_folder()
+        save(os.path.join(tmp, "conanfile.py"), "raise Exception('broken')")
+        with pytest.raises(ConanException, match="Unable to load conanfile in"):
+            load_python_file(os.path.join(tmp, "conanfile.py"))
+        assert sys.dont_write_bytecode is False
+
     def test_helpers_python_library(self):
         mylogger = """
 value = ""
