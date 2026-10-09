@@ -22,9 +22,13 @@ class ProfilesAPI:
         self._home_paths = HomePaths(conan_api.home_folder)
 
     def get_default_host(self):
-        """
-        :return: the path to the default "host" profile, either in the cache or as defined
-            by the user in configuration
+        """ Get the path to the default "host" profile, defined by the ``CONAN_DEFAULT_PROFILE``
+        environment variable, or the ``core:default_profile`` configuration, or ``default``
+        otherwise. If it is a relative path, it is relative to the profiles folder in the
+        Conan home.
+
+        :return: The path to the default "host" profile
+        :raises ConanException: If the default "host" profile doesn't exist
         """
         default_profile = os.environ.get("CONAN_DEFAULT_PROFILE")
         if default_profile is None:
@@ -41,9 +45,13 @@ class ProfilesAPI:
         return default_profile
 
     def get_default_build(self):
-        """
-        :return: the path to the default "build" profile, either in the cache or as
-            defined by the user in configuration
+        """ Get the path to the default "build" profile, defined by the
+        ``CONAN_DEFAULT_BUILD_PROFILE`` environment variable, or the
+        ``core:default_build_profile`` configuration, or ``default`` otherwise. If it is a
+        relative path, it is relative to the profiles folder in the Conan home.
+
+        :return: The path to the default "build" profile
+        :raises ConanException: If the default "build" profile doesn't exist
         """
         default_profile = os.environ.get("CONAN_DEFAULT_BUILD_PROFILE")
         if default_profile is None:
@@ -77,17 +85,22 @@ class ProfilesAPI:
     def get_profile(self, profiles, settings=None, options=None, conf=None, cwd=None, context=None):
         """ Computes a Profile as the result of aggregating all the user arguments, first it
         loads the "profiles", composing them in order (last profile has priority), and
-        finally adding the individual settings, options (priority over the profiles)
+        finally adding the individual settings, options and conf (priority over the profiles).
+        The resulting profile is also processed by the ``profile.py`` plugin, and its settings
+        are validated against the settings definitions.
 
-        :param profiles: the list of profiles to load
-        :param settings: list of "key=value" settings to define the profile. Patterns allowed as
+        :param profiles: The list of profiles to load. Each one can be the name of a profile in
+           the Conan home profiles folder, or a path, absolute or relative to ``cwd``.
+           An empty list will result in an empty profile.
+        :param settings: List of "key=value" settings to define the profile. Patterns allowed as
            "pkg-pattern:key=value"
-        :param options: list of "key=value" options. Patterns allowed as "pkg-pattern:key=value"
-        :param conf: list of "key=value" configurations. Following "conf" definitions, patterns
+        :param options: List of "key=value" options. Patterns allowed as "pkg-pattern:key=value"
+        :param conf: List of "key=value" configurations. Following "conf" definitions, patterns
            are allowed as "pkg-pattern:key=value", values that are lists or dictionaries might be
            allowed, and configuration operations like ``+=`` for appending are allowed.
-        :param cwd: the current working directory. If None, os.getcwd() will be used.
-        :param context: the context, "build" or "host" to which this profile belongs
+        :param cwd: The current working directory. If ``None``, ``os.getcwd()`` will be used.
+        :param context: The context, ``"build"`` or ``"host"`` to which this profile belongs
+        :return: The resulting Profile object
         """
         assert isinstance(profiles, list), "Please provide a list of profiles"
         global_conf = self._api_helpers.global_conf
@@ -126,9 +139,14 @@ class ProfilesAPI:
         return profile
 
     def get_path(self, profile, cwd=None, exists=True):
-        """
-        :return: the resolved path of the given profile name, that could be in the cache,
-            or local, depending on the "cwd"
+        """ Resolve the path of the given profile, that could be in the Conan home profiles
+        folder, or local, depending on the ``cwd``
+
+        :param profile: The name or path of the profile
+        :param cwd: The current working directory to resolve relative paths. If ``None``,
+            ``os.getcwd()`` will be used
+        :param exists: If ``True``, raise an error if the profile doesn't exist
+        :return: The resolved path of the given profile
         """
         cwd = cwd or os.getcwd()
         profiles_folder = self._home_paths.profiles_path
@@ -139,7 +157,8 @@ class ProfilesAPI:
         """
         List all the profiles files in the cache
 
-        :return: an alphabetically ordered list of profile files in the default cache location
+        :return: An alphabetically ordered list of the profile files in the Conan home profiles
+            folder, as paths relative to that folder
         """
         # List is to be extended (directories should not have a trailing slash)
         paths_to_ignore = ['.DS_Store']
@@ -167,7 +186,8 @@ class ProfilesAPI:
         The output of this detection is not guaranteed to be complete or stable, it might
         change in future releases, following the same rules as the "conan profile detect" command.
 
-        :return: an automatically detected Profile, with a "best guess" of the system settings
+        :return: An automatically detected Profile, with a "best guess" of the system settings.
+            Only the settings are defined.
         """
         profile = Profile()
         from conan.internal.api.profile.detect import detect_defaults_settings

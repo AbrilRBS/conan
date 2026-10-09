@@ -39,8 +39,10 @@ class RemotesAPI:
         Obtain a list of :ref:`Remote <conan.api.model.Remote>` objects matching the pattern.
 
         :param pattern: ``None``, single ``str`` or list of ``str``. If it is ``None``,
-          all remotes will be returned (equivalent to ``pattern="*"``).
-        :param only_enabled: boolean, by default return only enabled remotes
+          all remotes will be returned (equivalent to ``pattern="*"``). If the pattern is an
+          exact name without wildcards like "*" and no remote is found matching that exact
+          name (or it is disabled and ``only_enabled`` is ``True``), it will raise an error.
+        :param only_enabled: If ``True`` (default), return only enabled remotes
         :return: A list of :ref:`Remote <conan.api.model.Remote>` objects
 
         """
@@ -57,7 +59,7 @@ class RemotesAPI:
 
         :param pattern: single ``str`` or list of ``str``. If the pattern is an exact name without
           wildcards like "*" and no remote is found matching that exact name, it will raise an error.
-        :return: the list of disabled :ref:`Remote <conan.api.model.Remote>` objects  (even if they
+        :return: The list of disabled :ref:`Remote <conan.api.model.Remote>` objects (even if they
           were already disabled)
         """
         remotes = _load(self._remotes_file)
@@ -76,7 +78,7 @@ class RemotesAPI:
 
         :param pattern: single ``str`` or list of ``str``. If the pattern is an exact name without
           wildcards like "*" and no remote is found matching that exact name, it will raise an error.
-        :return: the list of enabled :ref:`Remote <conan.api.model.Remote>` objects (even if they
+        :return: The list of enabled :ref:`Remote <conan.api.model.Remote>` objects (even if they
           were already enabled)
         """
         remotes = _load(self._remotes_file)
@@ -93,9 +95,10 @@ class RemotesAPI:
         """
         Obtain a :ref:`Remote <conan.api.model.Remote>` object
 
-        :param remote_name: the exact name of the remote to be returned
-        :return: the :ref:`Remote <conan.api.model.Remote>` object, or raise an Exception if the
-          remote does not exist.
+        :param remote_name: The exact name of the remote to be returned. It can be a disabled
+          remote.
+        :return: The :ref:`Remote <conan.api.model.Remote>` object
+        :raises ConanException: If the remote does not exist
         """
         remotes = _load(self._remotes_file)
         try:
@@ -107,11 +110,12 @@ class RemotesAPI:
         """
         Add a new :ref:`Remote <conan.api.model.Remote>` object to the existing ones
 
-
-        :param remote: a :ref:`Remote <conan.api.model.Remote>` object to be added
-        :param force: do not fail if the remote already exist (but default it fails)
-        :param index: if not defined, the new remote will be last one. Pass an integer to insert
-          the remote in that position instead of the last one
+        :param remote: The :ref:`Remote <conan.api.model.Remote>` object to be added
+        :param force: If ``True``, do not fail if a remote with the same name already exists,
+          but replace it instead, and do not fail if another remote already has the same URL.
+          By default, both cases raise an error.
+        :param index: If not defined, the new remote will be the last one (or keep the position
+          of the replaced one). Pass an integer to insert the remote in that position instead
         """
         remotes = _load(self._remotes_file)
         if remote.remote_type != LOCAL_RECIPES_INDEX:
@@ -138,7 +142,8 @@ class RemotesAPI:
 
     def remove(self, pattern):
         """
-        Remove the remotes matching the ``pattern``
+        Remove the remotes matching the ``pattern``, together with the credentials stored
+        for them
 
         :param pattern: single ``str`` or list of ``str``. If the pattern is an exact name without
           wildcards like "*" and no remote is found matching that exact name, it will raise an error.
@@ -159,16 +164,21 @@ class RemotesAPI:
         """
         Update an existing remote
 
+        Every argument that is not defined (``None``) will keep its current value.
+
         :param remote_name: The name of the remote to update, must exist
-        :param url: optional url to update, if not defined it will not be updated
-        :param secure:  optional ssl secure connection to update
-        :param disabled: optional disabled state
-        :param index:  optional integer to change the order of the remote
-        :param allowed_packages: optional list of packages allowed from this remote
-        :param recipes_only: optional boolean to only allow recipe downloads from this remote,
+        :param url: Optional new URL. It cannot be the same as the URL of another remote
+        :param secure: Optional boolean to verify (or not) the SSL certificates of the remote
+        :param disabled: Optional boolean with the new disabled state
+        :param index: Optional integer to change the position of the remote in the list
+        :param allowed_packages: Optional list of reference patterns of the packages allowed
+            to be resolved from this remote
+        :param recipes_only: Optional boolean to only allow recipe downloads from this remote,
             never package binaries
-        :param force_auth: optional boolean to force Conan to skip anonymous access
+        :param force_auth: Optional boolean to force Conan to skip anonymous access
             and go directly for authenticated credentials against this remote
+        :raises ConanException: If the remote does not exist, or the URL is already used by
+            another remote
         """
         remotes = _load(self._remotes_file)
         try:
@@ -202,6 +212,8 @@ class RemotesAPI:
 
         :param remote_name: The previous existing name
         :param new_name: The new name
+        :raises ConanException: If the remote does not exist, or a remote with the new name
+            already exists
         """
         remotes = _load(self._remotes_file)
         d = {r.name: r for r in remotes}
@@ -225,11 +237,13 @@ class RemotesAPI:
 
     def user_login(self, remote: Remote, username: str, password: str):
         """
-        Perform user authentication against the given remote with the provided username and password
+        Perform user authentication against the given remote with the provided username and
+        password. If successful, the obtained credentials (not the password) are stored for later
+        use against that remote.
 
-        :param remote: a :ref:`Remote <conan.api.model.Remote>` object
-        :param username: the user login as ``str``
-        :param password: password ``str``
+        :param remote: The :ref:`Remote <conan.api.model.Remote>` object to authenticate against
+        :param username: The username
+        :param password: The password
         """
         self._api_helpers.remote_manager.authenticate(remote, username, password)
 
@@ -255,9 +269,10 @@ class RemotesAPI:
 
     def user_logout(self, remote: Remote):
         """
-        Logout from the given :ref:`Remote <conan.api.model.Remote>`
+        Logout from the given :ref:`Remote <conan.api.model.Remote>`, removing the credentials
+        stored for it
 
-        :param remote: The :ref:`Remote <conan.api.model.Remote>` object to logout
+        :param remote: The :ref:`Remote <conan.api.model.Remote>` object to log out from
         """
         localdb = LocalDB(self._home_folder)
         # The localdb only stores url + username + token, not remote name, so use URL as key

@@ -53,15 +53,20 @@ class GraphAPI:
                                  tested_python_requires=None):
         """ Create and initialize a root node from a test_package/conanfile.py consumer
 
-        :param tested_python_requires: the reference of the ``python_require`` to be tested
-        :param lockfile: Might be good to lock python-requires, build-requires
         :param path: The full path to the test_package/conanfile.py being used
-        :param tested_reference: The full RecipeReference of the tested package
-        :param profile_host:
-        :param profile_build:
-        :param update:
-        :param remotes:
-        :return: a graph Node, recipe=RECIPE_CONSUMER
+        :param tested_reference: The full
+            :ref:`RecipeReference <conan.api.model.RecipeReference>` of the tested package
+        :param profile_host: The host profile
+        :param profile_build: The build profile
+        :param update: (``False`` by default), if Conan should look for newer versions or
+            revisions of the ``python_requires`` of the test_package/conanfile.py
+        :param remotes: List of :ref:`Remote <conan.api.model.Remote>` objects to resolve the
+            ``python_requires`` of the test_package/conanfile.py
+        :param lockfile: Optional lockfile to lock the ``python_requires``
+        :param tested_python_requires: The reference of the ``python_require`` to be tested,
+            if the tested package is a ``python_require``
+        :return: An opaque root node object, to be passed to
+            :meth:`load_graph() <conan.api.subapi.graph.GraphAPI.load_graph>`
         """
 
         # necessary for correct resolution and update of remote python_requires
@@ -163,22 +168,23 @@ class GraphAPI:
 
     def load_graph(self, root_node, profile_host, profile_build, lockfile=None, remotes=None,
                    update=None, check_update=False):
-        """ Compute the dependency graph, starting from a root package, evaluation the graph with
-        the provided configuration in profile_build, and profile_host. The resulting graph is a
-        graph of recipes, but packages are not computed yet (package_ids) will be empty in the
-        result. The result might have errors, like version or configuration conflicts, but it is
-        still possible to inspect it. Only trying to install such graph will fail
+        """ Compute the dependency graph, starting from a root package, evaluating the graph with
+        the provided configuration in ``profile_build``, and ``profile_host``. The resulting graph
+        is a graph of recipes, but packages are not computed yet (package_ids will be empty in
+        the result). The result might have errors, like version or configuration conflicts, but
+        it is still possible to inspect it. Only trying to install such graph will fail
 
-        :param root_node: the starting point, an already initialized Node structure, as
+        :param root_node: The starting point, an already initialized opaque root node, as
             returned by :meth:`load_root_test_conanfile()
             <conan.api.subapi.graph.GraphAPI.load_root_test_conanfile>`
         :param profile_host: The host profile
         :param profile_build: The build profile
-        :param lockfile: A valid lockfile (None by default, means no locked)
-        :param remotes: list of remotes we want to check
-        :param update: (False by default), if Conan should look for newer versions or
+        :param lockfile: A valid lockfile (``None`` by default, means no locked)
+        :param remotes: List of :ref:`Remote <conan.api.model.Remote>` objects we want to check
+        :param update: (``False`` by default), if Conan should look for newer versions or
             revisions for already existing recipes in the Conan cache
         :param check_update: For "graph info" command, check if there are recipe updates
+        :return: The computed :ref:`dependency graph <reference_python_api_model_graph>`
         """
         ConanOutput().title("Computing dependency graph")
 
@@ -197,21 +203,27 @@ class GraphAPI:
     def analyze_binaries(self, graph, build_mode=None, remotes=None, update=None,
                          lockfile=None, build_modes_test=None, tested_graph=None):
         """ Given a dependency graph, will compute the package_ids of all recipes in the graph, and
-        evaluate if they should be built from sources, downloaded from a remote server, of if the
-        packages are already in the local Conan cache
+        evaluate if they should be built from sources, downloaded from a remote server, or if the
+        packages are already in the local Conan cache.
+        The graph is modified in place with this information.
 
-        :param lockfile:
-        :param graph: a Conan dependency graph, as returned by "load_graph()"
-        :param build_mode: TODO: Discuss if this should be a BuildMode object or list of arguments
-        :param remotes: list of remotes
+        :param graph: A Conan :ref:`dependency graph <reference_python_api_model_graph>`, as
+            returned by :meth:`load_graph() <conan.api.subapi.graph.GraphAPI.load_graph>`
+        :param build_mode: List of :ref:`build modes <reference_commands_build_modes>`, as
+            the ``--build`` command line argument, like ``["missing"]`` or
+            ``["missing:pkg/*"]``. ``None`` means that no package will be built from sources.
+        :param remotes: List of :ref:`Remote <conan.api.model.Remote>` objects
         :param update: (``False`` by default), if Conan should look for newer versions or
             revisions for already existing recipes in the Conan cache. It also accepts an array of
             reference patterns to limit the update to those references if any of the items match.
             Eg. ``False``, ``None`` or ``[]`` *means no update*,
             ``True`` or ``["*"]`` *means update all*,
             and ``["pkgA/*", "pkgB/1.0@user/channel"]`` *means to update only specific packages*.
-        :param build_modes_test: the --build-test argument
-        :param tested_graph: In case of a "test_package", the graph being tested
+        :param lockfile: A valid lockfile (``None`` by default, means no locked)
+        :param build_modes_test: List of build modes for the dependencies of a "test_package",
+            as the ``--build-test`` command line argument
+        :param tested_graph: In case of a "test_package", the graph being tested. When defined,
+            ``build_mode`` is ignored and ``build_modes_test`` is used instead.
         """
         ConanOutput().title("Computing necessary packages")
         binaries_analyzer = GraphBinariesAnalyzer(self._helpers.cache,
@@ -226,6 +238,16 @@ class GraphAPI:
     def find_first_missing_binary(graph, missing=None):
         """ (Experimental) Given a dependency graph, will return the first node with a
         missing binary package
+
+        :param graph: A Conan :ref:`dependency graph <reference_python_api_model_graph>`, after
+            :meth:`analyze_binaries() <conan.api.subapi.graph.GraphAPI.analyze_binaries>`
+        :param missing: Optional reference pattern. If defined, instead of the first node with
+            a missing binary, the first node whose reference matches it is returned
+        :return: A tuple of the :ref:`RecipeReference <conan.api.model.RecipeReference>` of the
+            node and an opaque object with its binary information, that can be passed to
+            :meth:`ListAPI.explain_missing_binaries()
+            <conan.api.subapi.list.ListAPI.explain_missing_binaries>`
+        :raises ConanException: If there is no missing binary
         """
         for node in graph.ordered_iterate():
             if ((not missing and node.binary == BINARY_MISSING)  # First missing binary or specified

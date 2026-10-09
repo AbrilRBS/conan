@@ -29,7 +29,8 @@ class AuditAPI:
     @staticmethod
     def scan(deps_graph, provider, context=None):
         """
-        Scan a given recipe for vulnerabilities in its dependencies.
+        Scan the dependencies of a dependency graph for vulnerabilities.
+        Only the name and version of each dependency are taken into account.
 
         :param deps_graph: Dependency graph as returned by the :class:`Graph API <conan.api.subapi.graph.GraphAPI>`
         :param provider: Provider object as returned by :meth:`get_provider() <conan.api.subapi.audit.AuditAPI.get_provider>`
@@ -70,9 +71,9 @@ class AuditAPI:
     @staticmethod
     def list(references: List[str], provider):
         """
-        List the vulnerabilities of the given reference.
+        List the vulnerabilities of the given references.
 
-        :param references: List of reference strings
+        :param references: List of reference strings, like ``"zlib/1.2.13"``
         :param provider: Provider object as returned by :meth:`get_provider() <conan.api.subapi.audit.AuditAPI.get_provider>`
         :return: A ``dict`` with the vulnerability information for each reference, with the same
             structure as the one returned by :meth:`scan() <conan.api.subapi.audit.AuditAPI.scan>`.
@@ -88,8 +89,13 @@ class AuditAPI:
         This object is only meant to be used as arguments for other methods in this class,
         and should not be used/modified directly.
 
+        If the ``CONAN_AUDIT_PROVIDER_TOKEN_<NAME>`` environment variable is defined (with
+        ``<NAME>`` being the uppercased provider name, with ``-`` replaced by ``_``),
+        its value is used as the provider token instead of the stored one.
+
         :param provider_name: Provider name
         :return: Provider opaque object
+        :raises ConanException: If the provider doesn't exist
         """
         providers = _load_providers(self._providers_path)
         if provider_name not in providers:
@@ -133,7 +139,8 @@ class AuditAPI:
         """
         Get all available providers.
 
-        :return: The list of available providers
+        :return: The list of available providers, as opaque objects like the one returned by
+            :meth:`get_provider() <conan.api.subapi.audit.AuditAPI.get_provider>`
         """
         providers = _load_providers(self._providers_path)
         result = []
@@ -149,6 +156,8 @@ class AuditAPI:
         :param name: Provider name
         :param url: Provider url
         :param provider_type: Provider type, either ``conan-center-proxy`` or ``private``
+        :raises ConanException: If a provider with the same name already exists, or the type
+            is not valid
         """
         providers = _load_providers(self._providers_path)
         if name in providers:
@@ -170,6 +179,7 @@ class AuditAPI:
         Remove a provider.
 
         :param provider_name: Provider name
+        :raises ConanException: If the provider doesn't exist
         """
         providers = _load_providers(self._providers_path)
         if provider_name not in providers:

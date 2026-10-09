@@ -30,8 +30,9 @@ class UploadAPI:
         If the recipe has an upload policy of ``skip``, its packages will be discarded from the
         upload list, and only the recipe will be considered.
 
-        :parameter package_list: A ``PackagesList`` object with the recipes and packages to check.
-        :parameter remote: Remote to check.
+        :parameter package_list: A :class:`PackagesList <conan.api.model.PackagesList>` object
+            with the recipes and packages to check. It will be modified in place.
+        :parameter remote: :ref:`Remote <conan.api.model.Remote>` to check.
         :parameter enabled_remotes: List of enabled remotes. This is used to possibly load
             python_requires from the listed recipes if necessary.
         :parameter force: If ``True``, the items already present in the remote will also be
@@ -56,7 +57,8 @@ class UploadAPI:
         with the complete information of the files to upload. It doesn't perform the upload
         nor checks upstream to see if the recipe is still there
 
-        :param package_list: A PackagesList object with the recipes and packages to upload.
+        :param package_list: A :class:`PackagesList <conan.api.model.PackagesList>` object with
+            the recipes and packages to upload. It will be modified in place.
         :param enabled_remotes: A list of remotes that are enabled in the client.
             Recipe sources will attempt to be fetched from these remotes.
         :param metadata: A list of patterns of metadata that should be uploaded.
@@ -89,18 +91,22 @@ class UploadAPI:
         per recipe based on the ``core.upload:parallel`` conf.
 
         The steps that this method performs are:
-            - if ``check_integrity`` is ``True``, calls ``conan_api.cache.check_integrity`` to
-              ensure the packages are not corrupted
-            - checks the upload policy of the recipes
-                - (if it is ``"skip"``, it will not upload the binaries, but will still upload
-                  the recipe)
-            - checks which revisions already exist in the server so that it can skip the upload
-            - prepares the artifacts to upload (compresses the conan_package.tgz)
-            - executes the actual upload
-            - uploads associated sources backups if any
 
-        :param package_list: A PackagesList object with the recipes and packages to upload.
-        :param remote: The remote to upload the packages to.
+        - if ``check_integrity`` is ``True``, calls
+          :meth:`CacheAPI.check_integrity() <conan.api.subapi.cache.CacheAPI.check_integrity>`
+          to ensure the packages are not corrupted
+        - checks the upload policy of the recipes (if it is ``"skip"``, it will not upload the
+          binaries, but will still upload the recipe)
+        - checks which revisions already exist in the server so that it can skip the upload
+        - prepares the artifacts to upload (compresses the conan_package.tgz)
+        - executes the actual upload
+        - uploads associated sources backups if any, and if the ``core.sources:upload_url``
+          conf is defined
+
+        :param package_list: A :class:`PackagesList <conan.api.model.PackagesList>` object with
+            the recipes and packages to upload. It will be modified in place with the results
+            of the upload.
+        :param remote: The :ref:`Remote <conan.api.model.Remote>` to upload the packages to.
         :param enabled_remotes: A list of remotes that are enabled in the client.
             Recipe sources will attempt to be fetched from these remotes,
             and to possibly load python_requires from the listed recipes if necessary.
@@ -114,6 +120,9 @@ class UploadAPI:
             it means that no metadata files should be uploaded.
         :param dry_run: If ``True``, it will not perform the actual upload,
             but will still prepare the artifacts and check the upstream.
+        :param is_prepared: If ``True``, the ``package_list`` was already checked against the
+            remote and prepared (for example by a previous ``dry_run``), so the integrity check,
+            the upstream check and the preparation steps are skipped.
         """
 
         def _upload_pkglist(pkglist, subtitle=lambda _: None):
@@ -152,7 +161,9 @@ class UploadAPI:
     def upload_backup_sources(self, files: List) -> None:
         """
         Upload to the server the backup sources files, that have been typically gathered by
-        CacheAPI.get_backup_sources()
+        :meth:`CacheAPI.get_backup_sources() <conan.api.subapi.cache.CacheAPI.get_backup_sources>`.
+        Nothing will be uploaded unless the ``core.sources:upload_url`` conf is defined.
+        Files already present in the server will not be uploaded again.
 
         :param files: The list of files that must be uploaded
         """

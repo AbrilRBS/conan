@@ -27,28 +27,33 @@ class ConfigAPI:
         self._helpers = helpers
 
     def home(self):
-        """ return the current Conan home folder containing the configuration files like
+        """ Return the current Conan home folder containing the configuration files like
         remotes, settings, profiles, and the packages cache. It is provided for debugging
         purposes. Recall that it is not allowed to write, modify or remove packages in the
-        packages cache, and that to automate tasks that uses packages from the cache Conan
+        packages cache, and that to automate tasks that use packages from the cache Conan
         provides mechanisms like deployers or custom commands.
+
+        :return: The path to the Conan home folder, as a string
         """
         return self._conan_api.cache_folder
 
     def install(self, path_or_url: str, verify_ssl, config_type=None, args=None,
                 source_folder=None, target_folder=None) -> None:
-        """ install Conan configuration from a git repo, from a zip file in an http server
+        """ Install Conan configuration from a git repo, from a zip file in an http server
         or a local folder
 
-        Calling this method will cause a reinitilization of the full ConanAPI, with possible
+        Calling this method will cause a reinitialization of the full ConanAPI, with possible
         invalidation of cached information, and references to objects from the ConanAPI might
         become dangling or outdated.
 
         :param path_or_url: path or url to install. It can be a http://.../somefile.zip, a
             git repository URL, or a local folder
-        :param verify_ssl: Argument passed to python-requests library for SSL verification
-        :param config_type: type of configuration to install: "git", "dir", "file", "url"
-        :param args: additional arguments to pass to git repositories cloning
+        :param verify_ssl: Whether to verify the SSL certificates when downloading the
+            configuration from a URL. Not used for git repositories, which use the git
+            client configuration
+        :param config_type: Type of configuration to install: ``"git"``, ``"dir"``, ``"file"``
+            or ``"url"``. If ``None``, it will be deduced from ``path_or_url``
+        :param args: Additional arguments to pass to the git clone command
         :param source_folder: If specified, install files from that folder of the origin only
         :param target_folder: If the files are to be installed in a specific folder in the Conan
             home. For example, if it is desired to install only profiles from a configuration and
@@ -73,25 +78,30 @@ class ConfigAPI:
         self._conan_api.reinit()
 
     def install_package(self, require, lockfile=None, force=False, remotes=None, profile=None):
-        """ install Conan configuration from a Conan package
+        """ Install Conan configuration from a Conan package
 
-        Calling this method will cause a reinitilization of the full ConanAPI, with possible
+        Calling this method will cause a reinitialization of the full ConanAPI, with possible
         invalidation of cached information, and references to objects from the ConanAPI might
         become dangling or outdated.
 
-        :param require: The package requirement to be installed. It can contain version range
-            expressions. If the revision is not specified, as a recipe ``requires``, it will
-            also resolve to the latest recipe-revision
+        :param require: The package requirement to be installed, as a string. It can contain
+            version range expressions. If the revision is not specified, as a recipe
+            ``requires``, it will also resolve to the latest recipe-revision
         :param lockfile: Lockfile to be used to constrain and lock the versions and recipe-revisions
             from the input requirements, to the exact versions and revisions specified in the
             lockfile
-        :param force: If the package has already been installed, nothing will be done unless
-            force is True
-        :param remotes: Remotes to look for the configuration package
+        :param force: If ``True``, re-install the configuration packages even if they are
+            already installed, and allow installing them even if that changes the order of the
+            previously installed ones. Otherwise, nothing will be done if they are already
+            installed, and an error will be raised if the order would change.
+        :param remotes: List of :ref:`Remote <conan.api.model.Remote>` objects to look for the
+            configuration packages. If ``None``, all the enabled remotes will be used.
         :param profile: If specified, use that profile to resolve for profile-specific different
-            configurations, like depending on different settings.
-        :return: list of RecipeReferences of all the configuration packages installed in the
-            Conan home after this operation, including the previously installed ones
+            configurations, like depending on different settings. If ``None``, an empty
+            profile will be used.
+        :return: A list of :ref:`RecipeReference <conan.api.model.RecipeReference>` of all the
+            configuration packages installed in the Conan home after this operation, including
+            the previously installed ones
         """
         ConanOutput().warning("The 'conan config install-pkg' is experimental",
                               warn_tag="experimental")
@@ -116,24 +126,31 @@ class ConfigAPI:
         return requested_requires, remotes
 
     def install_conanconfig(self, path, lockfile=None, force=False, remotes=None, profile=None):
-        """ install Conan configuration from a Conan "conanconfig.yml" file
+        """ Install Conan configuration from a Conan "conanconfig.yml" file
 
-        Calling this method will cause a reinitilization of the full ConanAPI, with possible
+        Calling this method will cause a reinitialization of the full ConanAPI, with possible
         invalidation of cached information, and references to objects from the ConanAPI might
         become dangling or outdated.
 
-        :param path: Path to the conanconfig.yml file containing the configuration packages
-            requirement definitions
+        :param path: Path to the conanconfig.yml file (or to the folder containing it) with the
+            configuration packages requirement definitions. The URLs defined in it, if any,
+            will be used as additional remotes.
         :param lockfile: Lockfile to be used to constrain and lock the versions and recipe-revisions
             from the input requirements, to the exact versions and revisions specified in the
             lockfile
-        :param force: If the package has already been installed, nothing will be done unless
-            force is True
-        :param remotes: Remotes to look for the configuration package
+        :param force: If ``True``, re-install the configuration packages even if they are
+            already installed, and allow installing them even if that changes the order of the
+            previously installed ones. Otherwise, nothing will be done if they are already
+            installed, and an error will be raised if the order would change.
+        :param remotes: List of :ref:`Remote <conan.api.model.Remote>` objects to look for the
+            configuration packages. If ``None``, all the enabled remotes will be used, unless
+            the conanconfig.yml file defines URLs, in which case only those will be used.
         :param profile: If specified, use that profile to resolve for profile-specific different
-            configurations, like depending on different settings.
-        :return: list of RecipeReferences of all the configuration packages installed in the
-            Conan home after this operation, including the previously installed ones
+            configurations, like depending on different settings. If ``None``, an empty
+            profile will be used.
+        :return: A list of :ref:`RecipeReference <conan.api.model.RecipeReference>` of all the
+            configuration packages installed in the Conan home after this operation, including
+            the previously installed ones
         """
         ConanOutput().warning("The 'conan config install-pkg' is experimental",
                               warn_tag="experimental")
@@ -213,11 +230,21 @@ class ConfigAPI:
         return final_config_refs
 
     def fetch_packages(self, requires, lockfile=None, remotes=None, profile=None):
-        """ get and download configuration packages into the Conan cache, without installing
+        """ Get and download configuration packages into the Conan cache, without installing
         such configuration in the current Conan home.
 
         This shouldn't be necessary for regular Conan configuration, and used at the moment
         exclusively for the "conan lock upgrade-config" experimental command.
+
+        :param requires: List of :ref:`RecipeReference <conan.api.model.RecipeReference>` of
+            the configuration packages to fetch. They can contain version ranges.
+        :param lockfile: Lockfile to be used to constrain and lock the versions and
+            recipe-revisions of the requirements
+        :param remotes: List of :ref:`Remote <conan.api.model.Remote>` objects to look for the
+            configuration packages. If ``None``, all the enabled remotes will be used.
+        :param profile: If specified, use that profile to resolve for profile-specific different
+            configurations. If ``None``, an empty profile will be used.
+        :return: A list of opaque objects, one per fetched configuration package
         """
         conan_api = self._conan_api
         remotes = conan_api.remotes.list() if remotes is None else remotes
@@ -259,37 +286,47 @@ class ConfigAPI:
         return result
 
     def get(self, name, default=None, check_type=None):
-        """ get the value of a global.conf item
+        """ Get the value of a global.conf item
 
-        :param name: configuration value to return
-        :param default: default value to return if the configuration doesn't contain a value
-        :param check_type: check if value is of type check_type, only if the value is defined
+        :param name: Name of the configuration whose value to return
+        :param default: Default value to return if the configuration doesn't contain a value
+        :param check_type: If defined, check that the value is of this type, raising an error
+            otherwise. For ``bool`` and ``str`` types, compatible values are converted, like
+            ``"true"`` to ``True``. Only checked if the value is defined.
+        :return: The value of the configuration, or ``default`` if it is not defined
         """
         return self._helpers.global_conf.get(name, default=default, check_type=check_type)
 
     def show(self, pattern) -> dict:
-        """ get the values of global.conf for those configurations that matches the pattern
-        that have an actual user definition.
+        """ Get the values of global.conf for those configurations that match the pattern
+        and have an actual user definition.
 
         Values with no user definitions will be skipped from the returned value,
         defaults for those confs won't be shown.
 
-        :param pattern: pattern to match against
-        :return: dict of configuration values
+        :param pattern: ``fnmatch`` pattern to match the configuration names against,
+            like ``"tools.build:*"``
+        :return: A ``dict`` with the matching configuration names and their values
         """
         return self._helpers.global_conf.show(pattern)
 
     @staticmethod
     def conf_list() -> dict:
-        """ list all the available built-in configurations
+        """ List all the available built-in configurations
 
-        :return: A sorted dictionary with all possible built-in configurations
+        :return: A ``dict``, sorted by name, with all possible built-in configurations
+            names as keys and their descriptions as values
         """
         return BUILT_IN_CONFS.copy()
 
     def clean(self) -> None:
-        """ reset the Conan home folder to a clean state, removing all the user
-        custom configuration, custom files, and resetting modified files
+        """ Reset the Conan home folder to a clean state, removing all the user
+        custom configuration, custom files, and resetting modified files.
+        The packages storage folder is not removed.
+
+        Calling this method will cause a reinitialization of the full ConanAPI, with possible
+        invalidation of cached information, and references to objects from the ConanAPI might
+        become dangling or outdated.
         """
         contents = os.listdir(self.home())
         packages_folder = (self._helpers.global_conf.get("core.cache:storage_path") or

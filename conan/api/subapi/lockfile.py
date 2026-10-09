@@ -23,24 +23,26 @@ class LockfileAPI:
     @staticmethod
     def get_lockfile(lockfile=None, conanfile_path=None, cwd=None, partial=False,
                      overrides=None) -> Lockfile:
-        """ obtain a lockfile, following this logic:
+        """ Obtain a lockfile, following this logic:
 
-        If lockfile is explicitly defined, it would be either absolute or relative to cwd and
-        the lockfile file must exist. If lockfile="" (empty string) the default "conan.lock"
-        lockfile will not be automatically used even if it is present.
+        If ``lockfile`` is explicitly defined, it would be either absolute or relative to ``cwd``
+        and the lockfile file must exist. If ``lockfile=""`` (empty string) the default
+        "conan.lock" lockfile will not be automatically used even if it is present.
 
-        If lockfile is not defined, it will still look for a default conan.lock:
+        If ``lockfile`` is not defined, it will still look for a default conan.lock:
 
-         - if conanfile_path is defined, it will be besides it
-         - if conanfile_path is not defined, the default conan.lock should be in cwd
+         - if ``conanfile_path`` is defined, it will be next to it
+         - if ``conanfile_path`` is not defined, the default conan.lock should be in ``cwd``
          - if the default conan.lock cannot be found, it is not an error
 
-
-        :param partial: If the obtained lockfile will allow partial resolving
-        :param cwd: the current working dir, if None, os.getcwd() will be used
+        :param lockfile: The path to the lockfile file, absolute or relative to ``cwd``
         :param conanfile_path: The full path to the conanfile, if existing
-        :param lockfile: the name of the lockfile file
-        :param overrides: Dictionary of overrides {overriden: [new_ref1, new_ref2]}
+        :param cwd: The current working dir, if ``None``, ``os.getcwd()`` will be used
+        :param partial: If the obtained lockfile will allow partial resolving
+        :param overrides: Dictionary of overrides ``{overridden: [new_ref1, new_ref2]}``.
+            It is an error to define them if no lockfile is found.
+        :return: The loaded lockfile, or ``None`` if no lockfile is used
+        :raises ConanException: If an explicitly defined ``lockfile`` doesn't exist
         """
         if lockfile == "":
             # Allow a way with ``--lockfile=""`` to optout automatic usage of conan.lock
@@ -71,7 +73,9 @@ class LockfileAPI:
     def check_lockfile_config(self, lockfile: Lockfile):
         """Verify that installed configurations are aligned with lockfile config_requires.
 
-        :param lockfile: The lockfile to check, can be None
+        :param lockfile: The lockfile to check, can be ``None``, in which case nothing is checked
+        :raises ConanException: If the installed configuration packages don't match the
+            lockfile ``config_requires``
         """
         if lockfile is None:
             return
@@ -85,10 +89,13 @@ class LockfileAPI:
         conan export operation, so the recently exported version and revision can be locked and
         prioritized.
 
-        :param lockfile: The lockfile to update. Can be None and a new lockfile will be created
-        :param conanfile: The exported conanfile
-        :param ref: The reference of the exported conanfile, including its recipe revision
-        :param is_build_require: If True, the exported conanfile is for a tool used as tool_requires
+        :param lockfile: The lockfile to update. Can be ``None`` and a new lockfile will be created
+        :param conanfile: The exported ``ConanFile`` object, as returned by
+            :meth:`ExportAPI.export() <conan.api.subapi.export.ExportAPI.export>`
+        :param ref: The :ref:`RecipeReference <conan.api.model.RecipeReference>` of the exported
+            conanfile, including its recipe revision
+        :param is_build_require: If ``True``, the exported conanfile is for a tool used as
+            ``tool_requires``
         :return: The updated lockfile
         """
         # The package_type is not fully processed at export
@@ -109,10 +116,13 @@ class LockfileAPI:
     def update_lockfile(lockfile, graph, lock_packages=False, clean=False) -> Lockfile:
         """ Update the lockfile with information from the dependency graph
 
-        :param lockfile: The lockfile to update. It can be None, and a new lockfile will be created.
-        :param graph: The dependency graph
+        :param lockfile: The lockfile to update. It can be ``None``, and a new lockfile will be
+            created.
+        :param graph: The :ref:`dependency graph <reference_python_api_model_graph>`
         :param lock_packages: Unused, do not use or define it.
-        :param clean: If true, completely clean the lockfile, computing a new lockfile from graph
+        :param clean: If ``True``, completely clean the lockfile, computing a new lockfile from
+            the graph
+        :return: The updated lockfile
         """
         if lockfile is None or clean:
             lockfile = Lockfile(graph, lock_packages)
@@ -125,8 +135,9 @@ class LockfileAPI:
     def merge_lockfiles(lockfiles) -> Lockfile:
         """ Merge multiple lockfiles into a single lockfile.
 
-        :param lockfiles: list of paths to the lockfile files to merge
-        :return: the merged lockfile
+        :param lockfiles: List of paths to the lockfile files to merge, absolute or relative to
+            the current working directory
+        :return: The merged lockfile
         """
         result = Lockfile()
         for lockfile in lockfiles:
@@ -138,13 +149,19 @@ class LockfileAPI:
     @staticmethod
     def add_lockfile(lockfile=None, requires=None, build_requires=None, python_requires=None,
                      config_requires=None) -> Lockfile:
-        """ Add requires to a lockfile. If the lockfile doesn't exist, it will be created
+        """ Add requires to a lockfile. If ``lockfile`` is ``None``, a new one will be created
 
-        :param lockfile: The lockfile to add to. Can be ``None``.
-        :param requires: The list of requirements to add. Can be ``None``.
-        :param build_requires: The list of build requirements to add. Can be ``None``.
-        :param python_requires: The list of Python requirements to add. Can be ``None``.
-        :param config_requires: The list of configuration requirements to add. Can be ``None``.
+        :param lockfile: The lockfile to add to. It will be mutated in place. Can be ``None``.
+        :param requires: The list of :ref:`RecipeReference <conan.api.model.RecipeReference>` of
+            the requirements to add. Can be ``None``.
+        :param build_requires: The list of :ref:`RecipeReference <conan.api.model.RecipeReference>`
+            of the build requirements to add. Can be ``None``.
+        :param python_requires: The list of
+            :ref:`RecipeReference <conan.api.model.RecipeReference>` of the Python requirements
+            to add. Can be ``None``.
+        :param config_requires: The list of
+            :ref:`RecipeReference <conan.api.model.RecipeReference>` of the configuration
+            requirements to add. Can be ``None``.
         :return: The lockfile with the added information.
         """
         if lockfile is None:
@@ -159,11 +176,15 @@ class LockfileAPI:
                         config_requires=None) -> Lockfile:
         """ Remove entries from lockfile
 
-        :param lockfile: The lockfile to remove entries. It will be mutated in place.
-        :param requires: The list of requires to remove
-        :param build_requires: The list of build requires to remove
-        :param python_requires: The list of python_requires to remove
-        :param config_requires: The list of config_requires to remove
+        :param lockfile: The lockfile to remove entries from. It will be mutated in place.
+        :param requires: The list of requires to remove, as reference strings or patterns,
+            like ``"zlib/1.2.13"``, ``"zlib/*"`` or ``"zlib/[>=1.2 <2]"``
+        :param build_requires: The list of build requires to remove, with the same format as
+            ``requires``
+        :param python_requires: The list of python_requires to remove, with the same format as
+            ``requires``
+        :param config_requires: The list of config_requires to remove, with the same format as
+            ``requires``
         :return: The modified lockfile
         """
         lockfile.remove(requires=requires, build_requires=build_requires,
@@ -175,8 +196,10 @@ class LockfileAPI:
         """ Save lockfile to disk
 
         :param lockfile: The lockfile object to save
-        :param lockfile_out: The output lockfile filename. If None, nothing will be saved
-        :param path: The path of the output lockfile, if None, it will be cwd
+        :param lockfile_out: The output lockfile filename, absolute or relative to ``path``.
+            If ``None``, nothing will be saved
+        :param path: The folder to resolve a relative ``lockfile_out`` against. If ``None``,
+            the current working directory will be used
         """
         if lockfile_out is not None:
             lockfile_out = make_abs_path(lockfile_out, path)
