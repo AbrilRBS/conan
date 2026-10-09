@@ -52,7 +52,9 @@ class ListAPI:
 
     def latest_recipe_revision(self, ref: RecipeReference, remote: Remote = None):
         """ For a given recipe reference, return the latest revision of the recipe in the remote,
-        or in the local cache if no remote is specified, or ``None`` if the recipe does not exist."""
+        or in the local cache if no remote is specified.
+
+        Raises if the reference is not found in the remote or cache."""
         assert ref.revision is None, "latest_recipe_revision: ref already have a revision"
         if remote:
             ret = self._api_helpers.remote_manager.get_latest_recipe_revision(ref, remote=remote)
@@ -73,9 +75,12 @@ class ListAPI:
         return results
 
     def latest_package_revision(self, pref: PkgReference, remote=None):
-        # TODO: This returns None if the given package_id is not existing. It should probably
-        #  raise NotFound, but to keep aligned with the above ``latest_recipe_revision`` which
-        #  is used as an "exists" check too in other places, lets respect the None return
+        """
+        "" For a given package reference, return the latest revision of the package in the remote,
+        or in the local cache if no remote is specified.
+
+        Raises if the reference is not found in the remote or cache.
+        """
         assert pref.revision is None, "latest_package_revision: ref already have a revision"
         assert pref.package_id is not None, "package_id must be defined"
         if remote:
