@@ -298,9 +298,8 @@ class CacheAPI:
             artifacts are stored) of the recipes and packages
         :param temp: If ``True``, remove the cache temporary folders, and the build folders of
             builds that failed to create a package. This is not limited to the ``package_list``.
-        :param backup_sources: If ``True``, remove the backup sources files from the cache.
-            Note that all the backup sources files are removed, not only the ones belonging to
-            the ``package_list`` recipes.
+        :param backup_sources: If ``True``, remove the backup sources files downloaded by the
+            recipes in the ``package_list``
         """
 
         cache = PkgCache(self._conan_api.cache_folder, self._api_helpers.global_conf)
@@ -492,17 +491,17 @@ class CacheAPI:
 
     def get_backup_sources(self, package_list=None, exclude=True, only_upload=True):
         """Get the list of backup source files currently present in the cache,
-        either all of them, or filtered by those belonging to the recipes and packages of the
-        ``package_list`` that are marked to be uploaded.
+        either all of them if no ``package_list`` is given, or filtered by those belonging to
+        the recipes in the ``package_list``
 
         :param package_list: A :class:`PackagesList <conan.api.model.PackagesList>` to filter
           the backup files by. Only those files downloaded by the recipes in the
-          ``package_list`` that are marked to be uploaded (or that have packages marked to be
-          uploaded) are returned. Only taken into account if ``only_upload`` is ``True``.
+          ``package_list`` are returned.
         :param exclude: If ``True``, exclude the sources that come from URLs present in the
           ``core.sources:exclude_urls`` global conf
-        :param only_upload: If ``True``, filter the files by the ``package_list``, if any.
-          If ``False``, the ``package_list`` is ignored and all the files are returned.
+        :param only_upload: If ``True``, only the recipes in the ``package_list`` that are
+          marked to be uploaded (or that have packages marked to be uploaded) are taken into
+          account. Not used if no ``package_list`` is given.
         :return: A list with the paths of the backup source files and their associated
           metadata files
         """
