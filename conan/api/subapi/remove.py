@@ -20,21 +20,25 @@ class RemoveAPI:
         If ``remote`` is specified, the recipe will be removed from the remote,
         otherwise they will be removed from the local cache.
 
-        :param ref: Recipe reference to remove
-        :param remote: Optional remote to remove references from"""
+        :param ref: The :ref:`RecipeReference <conan.api.model.RecipeReference>` to remove,
+            including its recipe revision
+        :param remote: Optional :ref:`Remote <conan.api.model.Remote>` to remove the recipe from
+        """
         self.recipes([ref], remote)
 
     def recipes(self, refs: List[RecipeReference], remote: Optional[Remote] = None):
-        """Removes the specified recipe reference alongside all its associated packages.
+        """Removes the specified recipe references alongside all their associated packages.
 
-        If ``remote`` is specified, the packages will be removed from the remote,
+        If ``remote`` is specified, the recipes will be removed from the remote,
         otherwise they will be removed from the local cache.
 
-        Warning:
-            This method is not atomic wit respect to each of the given references
+        .. warning::
 
-        :param refs: List of recipe references to delete, must contain recipe revisions
-        :param remote: Optional remote to remove references from
+            This method is not atomic with respect to each of the given references
+
+        :param refs: List of :ref:`RecipeReference <conan.api.model.RecipeReference>` to
+            remove, all of them including their recipe revision
+        :param remote: Optional :ref:`Remote <conan.api.model.Remote>` to remove the recipes from
         """
         assert all(bool(ref.revision) for ref in refs), "Recipe revision cannot be None to remove a recipe"
         if remote:
@@ -48,11 +52,12 @@ class RemoveAPI:
     def package(self, pref: PkgReference, remote: Optional[Remote] = None):
         """Removes the specified package reference.
 
-        If ``remote`` is specified, the packages will be removed from the remote,
-        otherwise they will be removed from the local cache.
+        If ``remote`` is specified, the package will be removed from the remote,
+        otherwise it will be removed from the local cache.
 
-        :param pref: Package reference to remove
-        :param remote: Optional remote to remove references from"""
+        :param pref: The ``PkgReference`` to remove, including its recipe and package revisions
+        :param remote: Optional :ref:`Remote <conan.api.model.Remote>` to remove the package from
+        """
         self.packages([pref], remote)
 
     def packages(self, prefs: List[PkgReference], remote: Optional[Remote] = None):
@@ -61,13 +66,15 @@ class RemoveAPI:
         If ``remote`` is specified, the packages will be removed from the remote,
         otherwise they will be removed from the local cache.
 
-        Warning:
+        .. warning::
+
             This method is not atomic when performed in the local cache
             with respect to each of the given references,
             nor are remotes guaranteed to implement this call atomically either.
 
-        :param prefs: List of package references to delete, must contain package revisions
-        :param remote: Optional remote to remove references from
+        :param prefs: List of ``PkgReference`` to remove, all of them including their recipe
+            and package revisions
+        :param remote: Optional :ref:`Remote <conan.api.model.Remote>` to remove the packages from
         """
         assert all(bool(pref.ref.revision) for pref in prefs), "Recipe revision cannot be None to remove a package"
         assert all(bool(pref.revision) for pref in prefs), "Package revision cannot be None to remove a package"

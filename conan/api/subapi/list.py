@@ -54,7 +54,14 @@ class ListAPI:
         """ For a given recipe reference, return the latest revision of the recipe in the remote,
         or in the local cache if no remote is specified.
 
-        Raises if the reference is not found in the remote or cache."""
+        :param ref: The :ref:`RecipeReference <conan.api.model.RecipeReference>` to check.
+            It must not contain a recipe revision.
+        :param remote: The :ref:`Remote <conan.api.model.Remote>` to check.
+            If ``None``, the local cache is checked instead.
+        :return: The :ref:`RecipeReference <conan.api.model.RecipeReference>` of the latest
+            recipe revision, including its revision timestamp
+        :raises ConanException: If the reference is not found in the remote or cache
+        """
         assert ref.revision is None, "latest_recipe_revision: ref already have a revision"
         if remote:
             ret = self._api_helpers.remote_manager.get_latest_recipe_revision(ref, remote=remote)
@@ -65,7 +72,15 @@ class ListAPI:
 
     def recipe_revisions(self, ref: RecipeReference, remote: Remote = None):
         """ For a given recipe reference, return all the revisions of the recipe in the remote,
-        or in the local cache if no remote is specified"""
+        or in the local cache if no remote is specified.
+
+        :param ref: The :ref:`RecipeReference <conan.api.model.RecipeReference>` to check.
+            It must not contain a recipe revision.
+        :param remote: The :ref:`Remote <conan.api.model.Remote>` to check.
+            If ``None``, the local cache is checked instead.
+        :return: A list of :ref:`RecipeReference <conan.api.model.RecipeReference>`, one per
+            recipe revision, including their revision timestamps
+        """
         assert ref.revision is None, "recipe_revisions: ref already have a revision"
         if remote:
             results = self._api_helpers.remote_manager.get_recipe_revisions(ref, remote=remote)
@@ -74,13 +89,7 @@ class ListAPI:
 
         return results
 
-    def latest_package_revision(self, pref: PkgReference, remote=None):
-        """
-        "" For a given package reference, return the latest revision of the package in the remote,
-        or in the local cache if no remote is specified.
-
-        Raises if the reference is not found in the remote or cache.
-        """
+    def latest_package_revision(self, pref: PkgReference, remote: Remote = None):
         assert pref.revision is None, "latest_package_revision: ref already have a revision"
         assert pref.package_id is not None, "package_id must be defined"
         if remote:
@@ -168,9 +177,14 @@ class ListAPI:
         :parameter Remote remote: Remote to search in,
             if ``None``, it will search in the local cache.
         :parameter str lru: If set, it will filter the results to only include
-            packages/binaries that have been used in the last 'lru' time.
-            It can be a string like ``"2d"`` (2 days) or ``"3h"`` (3 hours).
+            recipes/binaries that have **not** been used in the last ``lru`` time,
+            which is useful to find candidates for removal.
+            It can be a string like ``"2d"`` (2 days) or ``"3h"`` (3 hours), and the
+            available units are ``y``, ``M``, ``w``, ``d``, ``h``, ``m`` and ``s``.
+            It can only be used for the local cache, not for remotes.
         :parameter Profile profile: Profile to filter the packages by settings and options.
+        :return: A :class:`PackagesList <conan.api.model.PackagesList>` with the matching
+            recipes and packages
         """
         # TODO: Implement better error forwarding for "list" command that captures Exceptions
         if package_query and pattern.package_id and "*" not in pattern.package_id:
@@ -272,7 +286,19 @@ class ListAPI:
         return select_bundle
 
     def explain_missing_binaries(self, ref, conaninfo, remotes):
-        """ (Experimental) Explain why a binary is missing in the cache
+        """ (Experimental) Explain why a binary is missing, by looking for the closest
+        available binaries for the given recipe in the local cache and in the given remotes,
+        and computing their differences with the expected one.
+
+        :param ref: The :ref:`RecipeReference <conan.api.model.RecipeReference>` of the
+            recipe whose binary is missing, including its recipe revision
+        :param conaninfo: The opaque binary information object of the missing binary, as
+            returned by :meth:`find_first_missing_binary()
+            <conan.api.subapi.graph.GraphAPI.find_first_missing_binary>`
+        :param remotes: List of :ref:`Remote <conan.api.model.Remote>` objects to look for
+            binaries in, besides the local cache
+        :return: A :class:`PackagesList <conan.api.model.PackagesList>` with the closest
+            binaries found
         """
         ConanOutput().info(f"Missing binary: {ref}")
         ConanOutput().info(f"With conaninfo.txt (package_id):\n{conaninfo.dumps()}")
@@ -314,7 +340,14 @@ class ListAPI:
 
     def find_remotes(self, package_list, remotes):
         """
-        (Experimental) Find the remotes where the current package lists can be found
+        (Experimental) Find the remotes where the contents of the given package list can be found
+
+        :param package_list: The :class:`PackagesList <conan.api.model.PackagesList>` with the
+            recipes and packages to look for
+        :param remotes: List of :ref:`Remote <conan.api.model.Remote>` objects to look in
+        :return: A :class:`MultiPackagesList <conan.api.model.MultiPackagesList>` with one
+            entry per remote containing the subset of the ``package_list`` found in that
+            remote. Remotes in which nothing was found are not included.
         """
         result = MultiPackagesList()
         remote_manager = self._api_helpers.remote_manager

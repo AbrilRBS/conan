@@ -22,14 +22,21 @@ class ReportAPI:
 
     def diff(self, old_reference, new_reference, remotes, old_path=None, new_path=None, cwd=None):
         """
-        Compare two recipes and return the differences.
+        Compare two recipes, including their sources, and return the differences.
 
-        :param old_reference: The reference of the old recipe.
-        :param new_reference: The reference of the new recipe.
-        :param remotes: List of remotes to search for the recipes.
+        Each recipe is obtained from its local ``conanfile.py`` if its path is given, which is
+        temporarily exported to the cache, or otherwise from the cache or the remotes
+        (downloading it if necessary).
+
+        :param old_reference: The reference of the old recipe, as a string. If it doesn't
+            include a recipe revision, the latest one found in the cache or remotes is used.
+        :param new_reference: The reference of the new recipe, as a string. If it doesn't
+            include a recipe revision, the latest one found in the cache or remotes is used.
+        :param remotes: List of :ref:`Remote <conan.api.model.Remote>` objects to search for
+            the recipes.
         :param old_path: Optional path to the old recipe's conanfile.py.
         :param new_path: Optional path to the new recipe's conanfile.py.
-        :param cwd: Current working directory, used to resolve paths.
+        :param cwd: Current working directory, used to resolve relative paths.
         :return: A dictionary with the differences between the two recipes.
         """
 

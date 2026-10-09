@@ -49,8 +49,9 @@ class ConanAPI:
     """
     def __init__(self, cache_folder=None):
         """
-        :param cache_folder: Conan cache/home folder. It will have less priority than the
-                             ``"home_folder"`` defined in a Workspace.
+        :param cache_folder: Absolute path to the Conan home folder. If ``None``, it will be
+                             resolved as explained in
+                             :attr:`home_folder <conan.api.conan_api.ConanAPI.home_folder>`.
         """
 
         version = sys.version_info
@@ -78,16 +79,19 @@ class ConanAPI:
         self.profiles: ProfilesAPI = ProfilesAPI(self, self._api_helpers)
         #: Used to install binaries, sources, deploy packages and more
         self.install: InstallAPI = InstallAPI(self, self._api_helpers)
-        self.graph = GraphAPI(self, self._api_helpers)
+        #: Used to compute and analyze dependency graphs
+        self.graph: GraphAPI = GraphAPI(self, self._api_helpers)
         #: Used to export recipes and pre-compiled package binaries to the Conan cache
         self.export: ExportAPI = ExportAPI(self, self._api_helpers)
-        self.remove = RemoveAPI(self, self._api_helpers)
-        self.new = NewAPI(self)
+        #: Used to remove recipes and packages from the cache or remotes
+        self.remove: RemoveAPI = RemoveAPI(self, self._api_helpers)
+        #: Used to create new projects from templates
+        self.new: NewAPI = NewAPI(self)
         #: Used to upload recipes and packages to remotes
         self.upload: UploadAPI = UploadAPI(self, self._api_helpers)
         #: Used to download recipes and packages from remotes
         self.download: DownloadAPI = DownloadAPI(self, self._api_helpers)
-        #: Used to interact wit the packages storage cache
+        #: Used to interact with the packages storage cache
         self.cache: CacheAPI = CacheAPI(self, self._api_helpers)
         #: Used to read and manage lockfile files
         self.lockfile: LockfileAPI = LockfileAPI(self)
@@ -97,20 +101,25 @@ class ConanAPI:
         self.audit: AuditAPI = AuditAPI(self)
         #: Used to manage workspaces
         self.workspace: WorkspaceAPI = WorkspaceAPI(self)
+        #: Used to compute differences between recipes
         self.report: ReportAPI = ReportAPI(self, self._api_helpers)
 
     @property
     def home_folder(self) -> str:
         """ Where the Conan user home is located. Read only.
-        Can be modified by the ``CONAN_HOME`` environment variable or by the
-        ``.conanrc`` file in the current directory or any parent directory
-        when Conan is called.
+        It is the ``cache_folder`` argument of the constructor if defined. Otherwise, it can be
+        defined by the ``.conanrc`` file in the current directory or any parent directory
+        when Conan is called, or by the ``CONAN_HOME`` environment variable, and defaults to
+        ``~/.conan2``.
         """
         return self._home_folder
 
     def reinit(self):
         """
         Reinitialize the Conan API. This is useful when the configuration changes.
+
+        Note that references to objects obtained from the ConanAPI before calling this method
+        might become dangling or outdated.
         """
         self._api_helpers.reinit()
 

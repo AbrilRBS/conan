@@ -43,10 +43,11 @@ class CacheAPI:
         This folder is exclusively for **read-only** access, typically for debugging purposes,
         it is completely forbidden to modify any of its contents.
 
-        :param ref: RecipeReference. If it includes recipe revision, that exact revision will be
-           returned, if it doesn't include recipe revision, it will return the latest revision one.
-        :return: path to the folder, as a string
-        :raises: ConanExcepcion if the folder doesn't exist
+        :param ref: The :ref:`RecipeReference <conan.api.model.RecipeReference>` of the recipe.
+            If it includes a recipe revision, that exact revision will be used, otherwise the
+            latest recipe revision in the cache will be used.
+        :return: The path to the folder, as a string
+        :raises ConanException: If the recipe or the folder don't exist in the cache
         """
 
         cache = PkgCache(self._conan_api.cache_folder, self._api_helpers.global_conf)
@@ -61,10 +62,11 @@ class CacheAPI:
         the metadata files are not taken into account into the computation of the recipe hash
         (recipe revision).
 
-        :param ref: RecipeReference. If it includes recipe revision, that exact revision will be
-           returned, if it doesn't include recipe revision, it will return the latest revision one.
-        :return: path to the folder, as a string
-        :raises: ConanExcepcion if the folder doesn't exist
+        :param ref: The :ref:`RecipeReference <conan.api.model.RecipeReference>` of the recipe.
+            If it includes a recipe revision, that exact revision will be used, otherwise the
+            latest recipe revision in the cache will be used.
+        :return: The path to the folder, as a string
+        :raises ConanException: If the recipe or the folder don't exist in the cache
         """
         cache = PkgCache(self._conan_api.cache_folder, self._api_helpers.global_conf)
         ref = _resolve_latest_ref(cache, ref)
@@ -80,10 +82,11 @@ class CacheAPI:
         This folder is exclusively for **read-only** access, typically for debugging purposes,
         it is completely forbidden to modify any of its contents.
 
-        :param ref: RecipeReference. If it includes recipe revision, that exact revision will be
-           returned, if it doesn't include recipe revision, it will return the latest revision one.
-        :return: path to the folder, as a string
-        :raises: ConanExcepcion if the folder doesn't exist
+        :param ref: The :ref:`RecipeReference <conan.api.model.RecipeReference>` of the recipe.
+            If it includes a recipe revision, that exact revision will be used, otherwise the
+            latest recipe revision in the cache will be used.
+        :return: The path to the folder, as a string
+        :raises ConanException: If the recipe or the folder don't exist in the cache
         """
         cache = PkgCache(self._conan_api.cache_folder, self._api_helpers.global_conf)
         ref = _resolve_latest_ref(cache, ref)
@@ -93,16 +96,17 @@ class CacheAPI:
     def source_path(self, ref: RecipeReference):
         """Returns the path of the temporary source folder in the Conan cache
 
-        Note that the source folder only exist in the cache when the package has been created
+        Note that the source folder only exists in the cache when the package has been created
         locally or built from source.
 
         This folder is exclusively for **read-only** access, typically for debugging purposes,
         it is completely forbidden to modify any of its contents.
 
-        :param ref: RecipeReference. If it includes recipe revision, that exact revision will be
-           returned, if it doesn't include recipe revision, it will return the latest revision one.
-        :return: path to the folder, as a string
-        :raises: ConanExcepcion if the folder doesn't exist
+        :param ref: The :ref:`RecipeReference <conan.api.model.RecipeReference>` of the recipe.
+            If it includes a recipe revision, that exact revision will be used, otherwise the
+            latest recipe revision in the cache will be used.
+        :return: The path to the folder, as a string
+        :raises ConanException: If the recipe or the folder don't exist in the cache
         """
         cache = PkgCache(self._conan_api.cache_folder, self._api_helpers.global_conf)
         ref = _resolve_latest_ref(cache, ref)
@@ -112,17 +116,17 @@ class CacheAPI:
     def build_path(self, pref: PkgReference):
         """Returns the path of the temporary build folder in the Conan cache
 
-        Note that the build folder only exist in the cache when the package has been created
+        Note that the build folder only exists in the cache when the package has been created
         locally or built from source.
 
         This folder is exclusively for **read-only** access, typically for debugging purposes,
         it is completely forbidden to modify any of its contents.
 
-        :param pref: PkgReference. If it includes recipe revision, that exact revision will be
-           returned, if it doesn't include recipe revision, it will return the latest revision one.
-           Exactly same behavior for the package revision.
-        :return: path to the folder, as a string
-        :raises: ConanExcepcion if the folder doesn't exist
+        :param pref: The ``PkgReference`` of the package, which must include the package_id.
+            If it includes a recipe revision, that exact revision will be used, otherwise the
+            latest recipe revision in the cache will be used. Same for the package revision.
+        :return: The path to the folder, as a string
+        :raises ConanException: If the package or the folder don't exist in the cache
         """
         cache = PkgCache(self._conan_api.cache_folder, self._api_helpers.global_conf)
         pref = _resolve_latest_pref(cache, pref)
@@ -136,11 +140,11 @@ class CacheAPI:
         the metadata files are not taken into account into the computation of the package hash
         (package revision).
 
-       :param pref: PkgReference. If it includes recipe revision, that exact revision will be
-           returned, if it doesn't include recipe revision, it will return the latest revision one.
-           Exactly same behavior for the package revision.
-       :return: path to the folder, as a string
-       :raises: ConanExcepcion if the folder doesn't exist
+        :param pref: The ``PkgReference`` of the package, which must include the package_id.
+            If it includes a recipe revision, that exact revision will be used, otherwise the
+            latest recipe revision in the cache will be used. Same for the package revision.
+        :return: The path to the folder, as a string
+        :raises ConanException: If the package or the folder don't exist in the cache
         """
         cache = PkgCache(self._conan_api.cache_folder, self._api_helpers.global_conf)
         pref = _resolve_latest_pref(cache, pref)
@@ -150,14 +154,18 @@ class CacheAPI:
     def package_path(self, pref: PkgReference):
         """Returns the path of the package folder in the Conan cache
 
+        If the recipe implements the :ref:`finalize() <reference_conanfile_methods_finalize>`
+        method and it has already been executed, the path of the finalized folder is returned
+        instead.
+
         This folder is exclusively for **read-only** access, typically for debugging purposes,
         it is completely forbidden to modify any of its contents.
 
-        :param pref: PkgReference. If it includes recipe revision, that exact revision will be
-           returned, if it doesn't include recipe revision, it will return the latest revision one.
-           Exactly same behavior for the package revision.
-        :return: path to the folder, as a string
-        :raises: ConanExcepcion if the folder doesn't exist
+        :param pref: The ``PkgReference`` of the package, which must include the package_id.
+            If it includes a recipe revision, that exact revision will be used, otherwise the
+            latest recipe revision in the cache will be used. Same for the package revision.
+        :return: The path to the folder, as a string
+        :raises ConanException: If the package or the folder don't exist in the cache
         """
         cache = PkgCache(self._conan_api.cache_folder, self._api_helpers.global_conf)
         pref = _resolve_latest_pref(cache, pref)
@@ -170,10 +178,14 @@ class CacheAPI:
         """
         Check if the recipes and packages are corrupted
 
-        :param package_list: PackagesList to check
-        :param return_pkg_list: If True, return a PackagesList with corrupted artifacts
-        :return: PackagesList with corrupted artifacts if return_pkg_list is True
-        :raises: ConanExcepcion if there are corrupted artifacts and return_pkg_list is False
+        :param package_list: The :class:`PackagesList <conan.api.model.PackagesList>` with
+            the recipes and packages to check
+        :param return_pkg_list: If ``True``, return the corrupted artifacts instead of raising
+        :return: If ``return_pkg_list`` is ``True``, a
+            :class:`PackagesList <conan.api.model.PackagesList>` with the corrupted artifacts,
+            otherwise ``None``
+        :raises ConanException: If there are corrupted artifacts and ``return_pkg_list``
+            is ``False``
         """
         cache = PkgCache(self._conan_api.cache_folder, self._api_helpers.global_conf)
         checker = IntegrityChecker(cache)
@@ -184,7 +196,18 @@ class CacheAPI:
             raise ConanException("There are corrupted artifacts, check the error logs")
 
     def sign(self, package_list):
-        """Sign packages with the package signing plugin"""
+        """Sign the recipes and packages with the
+        :ref:`package signing plugin <reference_extensions_package_signing>`.
+
+        The artifacts to sign are prepared (compressed) first if needed, which might require
+        fetching missing recipe sources from the enabled remotes.
+
+        :param package_list: The :class:`PackagesList <conan.api.model.PackagesList>` with
+            the recipes and packages to sign
+        :return: The same ``package_list``, updated with the signing results. Failures to sign
+            an artifact do not raise, but are recorded in its entry of the package list.
+        :raises ConanException: If the plugin does not define a ``sign()`` function
+        """
         cache = PkgCache(self._conan_api.cache_folder, self._api_helpers.global_conf)
         pkg_signer = PkgSignaturesPlugin(cache, self._conan_api.home_folder)
         if not pkg_signer.is_sign_configured:
@@ -219,7 +242,15 @@ class CacheAPI:
         return package_list
 
     def verify(self, package_list):
-        """Verify packages with the package signing plugin"""
+        """Verify the signatures of the recipes and packages with the
+        :ref:`package signing plugin <reference_extensions_package_signing>`.
+
+        :param package_list: The :class:`PackagesList <conan.api.model.PackagesList>` with
+            the recipes and packages to verify
+        :return: The same ``package_list``, updated with the verification results. Failures to
+            verify an artifact do not raise, but are recorded in its entry of the package list.
+        :raises ConanException: If the plugin does not define a ``verify()`` function
+        """
         cache = PkgCache(self._conan_api.cache_folder, self._api_helpers.global_conf)
         pkg_signer = PkgSignaturesPlugin(cache, self._conan_api.home_folder)
         if not pkg_signer.is_verify_configured:
@@ -259,13 +290,17 @@ class CacheAPI:
         Remove non critical folders from the cache, like source, build and download (.tgz store)
         folders.
 
-        :param package_list: the package lists that should be cleaned
-        :param source: boolean, remove the "source" folder if True
-        :param build: boolean, remove the "build" folder if True
-        :param download: boolean, remove the "download (.tgz)" folder if True
-        :param temp: boolean, remove the temporary folders
-        :param backup_sources: boolean, remove the "source" folder if True
-        :return:
+        :param package_list: The :class:`PackagesList <conan.api.model.PackagesList>` with
+            the recipes and packages that should be cleaned
+        :param source: If ``True``, remove the "source" folder of the recipes
+        :param build: If ``True``, remove the "build" folder of the packages
+        :param download: If ``True``, remove the "download" folder (where the compressed .tgz
+            artifacts are stored) of the recipes and packages
+        :param temp: If ``True``, remove the cache temporary folders, and the build folders of
+            builds that failed to create a package. This is not limited to the ``package_list``.
+        :param backup_sources: If ``True``, remove the backup sources files from the cache.
+            Note that all the backup sources files are removed, not only the ones belonging to
+            the ``package_list`` recipes.
         """
 
         cache = PkgCache(self._conan_api.cache_folder, self._api_helpers.global_conf)
@@ -314,12 +349,12 @@ class CacheAPI:
         and modifying the contents would be equivalent to modify the Conan package cache, which
         is forbidden.
 
-        :param package_list: PackagesList containing the recipes and packages to add
-           to the compressed archive
+        :param package_list: The :class:`PackagesList <conan.api.model.PackagesList>` with
+           the recipes and packages to add to the compressed archive
         :param path: The archive file to generate. Based on the extension of the file, different
            compression formats can be used (.tgz, .txz and .tzst, the latter only for Python>=3.14).
-        :param no_source: If True, the source folders in the cache will not be added to the archive.
-        :return:
+        :param no_source: If ``True``, the source folders in the cache will not be added to the
+           archive.
         """
         global_conf = self._api_helpers.global_conf
         cache = PkgCache(self._conan_api.cache_folder, global_conf)
@@ -383,7 +418,8 @@ class CacheAPI:
 
         :param path: The archive file to restore. Based on the extension of the file, different
            compression formats can be used (.tgz, .txz and .tzst, the latter only for Python>=3.14).
-        :return: a PackageLists with the recipes and packages that have been restored to the cache
+        :return: A :class:`PackagesList <conan.api.model.PackagesList>` with the recipes and
+           packages that have been restored to the cache
         """
         if not os.path.isfile(path):
             raise ConanException(f"Restore archive doesn't exist in {path}")
@@ -455,16 +491,20 @@ class CacheAPI:
         return package_list
 
     def get_backup_sources(self, package_list=None, exclude=True, only_upload=True):
-        """Get list of backup source files currently present in the cache,
-        either all of them if no argument, or filtered by those belonging to the references
-        in the package_list
+        """Get the list of backup source files currently present in the cache,
+        either all of them, or filtered by those belonging to the recipes and packages of the
+        ``package_list`` that are marked to be uploaded.
 
-        :param package_list: a PackagesList object to filter backup files from (The files should
-          have been downloaded form any of the references in the package_list)
-        :param exclude: if True, exclude the sources that come from URLs present the
-          core.sources:exclude_urls global conf
-        :param only_upload: if True, only return the files for packages that are set to be uploaded
-        :return: A list of files that need to be uploaded
+        :param package_list: A :class:`PackagesList <conan.api.model.PackagesList>` to filter
+          the backup files by. Only those files downloaded by the recipes in the
+          ``package_list`` that are marked to be uploaded (or that have packages marked to be
+          uploaded) are returned. Only taken into account if ``only_upload`` is ``True``.
+        :param exclude: If ``True``, exclude the sources that come from URLs present in the
+          ``core.sources:exclude_urls`` global conf
+        :param only_upload: If ``True``, filter the files by the ``package_list``, if any.
+          If ``False``, the ``package_list`` is ignored and all the files are returned.
+        :return: A list with the paths of the backup source files and their associated
+          metadata files
         """
         config = self._api_helpers.global_conf
         download_cache_path = config.get("core.sources:download_cache")

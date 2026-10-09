@@ -19,7 +19,7 @@ class Remote:
         :param disabled: Disable the remote repository.
         :param allowed_packages: List of patterns of allowed packages from this remote
         :param remote_type: Type of the remote repository, use "local-recipes-index" or ``None``
-        :param recipes_only: If True, binaries form this remote will be ignored and never used
+        :param recipes_only: If ``True``, binaries from this remote will be ignored and never used
         :param force_auth: If True, Conan will not attempt anonymous access to this remote,
             going directly for the authenticated credentials instead.
         """

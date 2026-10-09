@@ -23,11 +23,13 @@ class CommandAPI:
         """ Runs another Conan command via API
 
         :param cmd: Conan command to run. It can be either a string, or a list of strings.
-        :param raise_on_errors: If True, it will raise an exception on errors.
-           By default, some command will return errors as ``conan_error`` entries in the result,
-           and it will be the caller's responsibility to check for them and raise/report them if desired.
+        :param raise_on_errors: If ``True`` (default), it will raise an exception if the
+           command result contains a ``conan_error`` entry, as some commands report their errors
+           that way instead of raising. If ``False``, it will be the caller's responsibility to
+           check the result for them and raise/report them if desired.
         :return: It will return what that command returns. Note that different commands can
            return different things, so the caller needs to process it accordingly.
+        :raises ConanException: If the command doesn't exist
         """
         if isinstance(cmd, str):
             cmd = shlex.split(cmd)

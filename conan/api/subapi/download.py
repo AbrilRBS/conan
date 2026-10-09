@@ -17,9 +17,17 @@ class DownloadAPI:
         self._api_helpers = api_helpers
 
     def recipe(self, ref: RecipeReference, remote: Remote, metadata: Optional[List[str]] = None):
-        """Download the recipe specified in the ref from the remote.
+        """Download the recipe specified in the ref from the remote, together with its
+        exported sources.
         If the recipe is already in the cache it will be skipped,
-        but the specified metadata will be downloaded."""
+        but the specified metadata will be downloaded.
+
+        :param ref: The :ref:`RecipeReference <conan.api.model.RecipeReference>` to download,
+            including its recipe revision
+        :param remote: The :ref:`Remote <conan.api.model.Remote>` to download from
+        :param metadata: Optional list of patterns of the metadata files to download
+        :return: ``True`` if the recipe was downloaded, ``False`` if it was already in the cache
+        """
         output = ConanOutput()
         assert ref.revision, f"Reference '{ref}' must have revision"
         try:
@@ -51,7 +59,15 @@ class DownloadAPI:
         """Download the package specified in the pref from the remote.
         The recipe for this package binary must already exist in the cache.
         If the package is already in the cache it will be skipped,
-        but the specified metadata will be downloaded."""
+        but the specified metadata will be downloaded.
+
+        :param pref: The ``PkgReference`` to download, including its recipe revision, package_id
+            and package revision
+        :param remote: The :ref:`Remote <conan.api.model.Remote>` to download from
+        :param metadata: Optional list of patterns of the metadata files to download
+        :return: ``True`` if the package was downloaded, ``False`` if it was already in the cache
+        :raises ConanException: If the recipe of the package is not in the cache
+        """
         output = ConanOutput()
 
         try:
@@ -83,6 +99,12 @@ class DownloadAPI:
                         folder: str):
         """Download only the recipe metadata files into ``folder``, without using the Conan cache.
         Files are always fetched from the server and written under ``<folder>/metadata/``.
+
+        :param ref: The :ref:`RecipeReference <conan.api.model.RecipeReference>` whose metadata
+            to download, including its recipe revision
+        :param remote: The :ref:`Remote <conan.api.model.Remote>` to download from
+        :param metadata: List of patterns of the metadata files to download, must not be empty
+        :param folder: The folder where the metadata files will be downloaded
         """
         assert ref.revision, "recipe reference must have revision resolved"
         assert metadata, "metadata patterns must be provided"
@@ -92,6 +114,12 @@ class DownloadAPI:
                          folder: str):
         """Download only the package metadata files into ``folder``, without using the Conan cache.
         Files are always fetched from the server and written under ``<folder>/metadata/``.
+
+        :param pref: The ``PkgReference`` whose metadata to download, including its recipe
+            revision, package_id and package revision
+        :param remote: The :ref:`Remote <conan.api.model.Remote>` to download from
+        :param metadata: List of patterns of the metadata files to download, must not be empty
+        :param folder: The folder where the metadata files will be downloaded
         """
         assert pref.ref.revision and pref.revision, \
             "package reference must have recipe and package revisions resolved"
@@ -101,7 +129,15 @@ class DownloadAPI:
     def download_full(self, package_list: PackagesList, remote: Remote,
                       metadata: Optional[List[str]] = None):
         """Download the recipes and packages specified in the ``package_list`` from the remote,
-        parallelized based on ``core.download:parallel``"""
+        parallelized based on ``core.download:parallel``.
+        Recipes and packages already in the cache will be skipped, but the specified metadata
+        will be downloaded.
+
+        :param package_list: The :class:`PackagesList <conan.api.model.PackagesList>` with the
+            recipes and packages to download. All of them must include their revisions.
+        :param remote: The :ref:`Remote <conan.api.model.Remote>` to download from
+        :param metadata: Optional list of patterns of the metadata files to download
+        """
         def _download_pkglist(pkglist):
             for ref, packages in pkglist.items():
                 self.recipe(ref, remote, metadata)
