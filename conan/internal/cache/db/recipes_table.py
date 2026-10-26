@@ -26,6 +26,10 @@ class RecipesDBTable(BaseDbTable):
             "lru": row.lru,
         }
 
+    def row_as_dict(self, row):
+        """ ``row`` as returned by ``all_latest()`` """
+        return self._as_dict(self.row_type(*row))
+
     def _where_clause(self, ref):
         assert isinstance(ref, RecipeReference)
         where_dict = {
@@ -75,6 +79,21 @@ class RecipesDBTable(BaseDbTable):
             r = conn.execute(query)
             rows = r.fetchall()
         return [RecipeReference.loads(row[0]) for row in rows]
+
+    def all_latest(self):
+        """ The latest revision of every different reference (name/version@user/channel), as
+        rows (reference, rrev, path, timestamp, lru) sorted by reference """
+        query = f'SELECT {self.columns.reference}, ' \
+                f'{self.columns.rrev}, ' \
+                f'{self.columns.path}, ' \
+                f'MAX({self.columns.timestamp}), ' \
+                f'{self.columns.lru} ' \
+                f'FROM {self.table_name} ' \
+                f'GROUP BY {self.columns.reference} ' \
+                f'ORDER BY {self.columns.reference}'
+        with self.db_connection() as conn:
+            r = conn.execute(query)
+            return r.fetchall()
 
     def get_recipe(self, ref: RecipeReference):
         query = f'SELECT * FROM {self.table_name} ' \

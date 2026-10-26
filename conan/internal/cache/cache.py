@@ -217,13 +217,17 @@ class PkgCache:
 
     def search_recipes(self, pattern=None):
         # Conan references in main storage
+        name = None
         if pattern:
             if isinstance(pattern, RecipeReference):
                 pattern = repr(pattern)
+            # If the name is not a pattern, like in "pkg/*", only references of that name can match
+            name = pattern.split("/", 1)[0]
+            name = None if any(c in name for c in "*?[") else name
             pattern = translate(pattern)
             pattern = re.compile(pattern)
 
-        return self._db.list_references(pattern)
+        return self._db.list_references(pattern, name)
 
     def exists_prev(self, pref):
         # Used just by download to skip downloads if prev already exists in cache
