@@ -20,39 +20,62 @@ _SINGLE_VALUE_VARS = "_type", "_exe", "_location", "_link_location", "_languages
 
 class MockInfoProperty:
     """
-    # TODO: Remove in 2.X
-    to mock user_info and env_info
+    Conan 1.X cpp_info.names/filenames/build_modules, user_info and env_info. They have no effect,
+    they only exist so already published recipe revisions that set them (many ConanCenter ones did,
+    to stay compatible with Conan 1) keep working. Using them is an error for recipes that require
+    Conan >= 2.35 (``required_conan_version`` attribute or ``core:policies`` conf)
+    TODO: Remove in the next major version
     """
     counter = {}
-    package = None
+    package = None  # The package whose package_info() is running
+    strict = False  # Raise instead of warning, for the package whose package_info() is running
+    _alternatives = {"cpp_info.names": 'set_property("cmake_target_name"/"pkg_config_name", ...)',
+                     "cpp_info.filenames": 'set_property("cmake_file_name", ...)',
+                     "cpp_info.build_modules": 'set_property("cmake_build_modules", [...])',
+                     "user_info": "self.conf_info",
+                     "env_info": "self.buildenv_info/self.runenv_info"}
 
     def __init__(self, name):
         self._name = name
 
     @staticmethod
     def message():
-        if not MockInfoProperty.counter:
+        # Reset first, so nothing is reported again if the warning is raised as an error
+        counter, MockInfoProperty.counter = MockInfoProperty.counter, {}
+        if not counter:
             return
-        ConanOutput().warning("Usage of deprecated Conan 1.X features that will be removed in "
-                              "Conan 2.X:", warn_tag="deprecated")
-        for k, v in MockInfoProperty.counter.items():
-            ConanOutput().warning(f"    '{k}' used in: {', '.join(v)}", warn_tag="deprecated")
-        MockInfoProperty.counter = {}
+        # A single message, so core:warnings_as_errors=["deprecated"] reports all of it
+        msg = ["Usage of Conan 1.X features, they have no effect in Conan 2 and will be removed "
+               "in the next major version:"]
+        for k, v in counter.items():
+            used_in = ", ".join(sorted(p or "unknown, outside package_info()" for p in v))
+            msg.append(f"    '{k}' used in: {used_in}. "
+                       f"Use {MockInfoProperty._alternatives[k]} instead")
+        ConanOutput().warning("\n".join(msg), warn_tag="deprecated")
+
+    def _used(self):
+        name = self._name
+        if MockInfoProperty.strict:
+            raise ConanException(f"'{name}' is a Conan 1.X feature that has no effect in Conan 2, "
+                                 f"use {MockInfoProperty._alternatives[name]} instead. It is an "
+                                 "error when 'required_conan_version' (recipe attribute or "
+                                 "'core:policies' conf) requires Conan >= 2.35")
+        MockInfoProperty.counter.setdefault(name, set()).add(MockInfoProperty.package)
 
     def __getitem__(self, key):
-        MockInfoProperty.counter.setdefault(self._name, set()).add(self.package)
+        self._used()
         return []
 
     def __setitem__(self, key, value):
-        MockInfoProperty.counter.setdefault(self._name, set()).add(self.package)
+        self._used()
 
     def __getattr__(self, attr):
-        MockInfoProperty.counter.setdefault(self._name, set()).add(self.package)
+        self._used()
         return []
 
     def __setattr__(self, attr, value):
         if attr != "_name":
-            MockInfoProperty.counter.setdefault(self._name, set()).add(self.package)
+            self._used()
         return super(MockInfoProperty, self).__setattr__(attr, value)
 
 

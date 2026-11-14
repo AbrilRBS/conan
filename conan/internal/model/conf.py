@@ -24,7 +24,8 @@ such as keeping deprecated behaviours:
    - If required_conan_version>=2.28, bugfix https://github.com/conan-io/conan/pull/19705 for transitive static libraries package_id
    - If required_conan_version>=2.28, bugfix https://github.com/conan-io/conan/pull/19849 for VirtualBuildEnv bindir path propagation based on requirement run trait
    - If required_conan_version>=2.28, https://github.com/conan-io/conan/pull/19286 defaults the new 'consistent' trait to True for the host context, even when 'visible=False'
-   - If required_conan_version>=2.30, bugfix https://github.com/conan-io/conan/pull/20073 for propagation of the 'transitive_header' trait"""
+   - If required_conan_version>=2.30, bugfix https://github.com/conan-io/conan/pull/20073 for propagation of the 'transitive_header' trait
+   - If required_conan_version>=2.35, the Conan 1.X cpp_info.names/filenames/build_modules, user_info and env_info are an error instead of a deprecation warning"""
 
 BUILT_IN_CONFS = {
     "core:required_conan_version": "Raise if current version does not match the defined range.",

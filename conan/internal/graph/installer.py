@@ -13,6 +13,7 @@ from conan.internal.source import retrieve_exports_sources, config_source
 from conan.internal.errors import conanfile_remove_attr, conanfile_exception_formatter
 from conan.errors import ConanException
 from conan.internal.model.cpp_info import CppInfo, MockInfoProperty
+from conan.internal.model.version_range import required_conan_version_policy
 from conan.api.model import PkgReference
 from conan.internal.paths import CONANINFO
 from conan.internal.util import cpu_count
@@ -440,7 +441,14 @@ class BinaryInstaller:
                     with conanfile_remove_attr(conanfile, ['info', "source_folder", "build_folder"],
                                                "package_info"):
                         MockInfoProperty.package = str(conanfile)
-                        conanfile.package_info()
+                        # Conan 1.X cpp_info.names, env_info... are an error for recipes >=2.35
+                        MockInfoProperty.strict = required_conan_version_policy(conanfile,
+                                                                                "2.34.9")
+                        try:
+                            conanfile.package_info()
+                        finally:
+                            MockInfoProperty.package = None
+                            MockInfoProperty.strict = False
 
                 # TODO: Check this package_folder usage for editable when not defined
                 conanfile.cpp.package.set_relative_base_folder(package_folder)

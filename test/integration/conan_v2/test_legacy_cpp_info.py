@@ -1,5 +1,7 @@
 import textwrap
 
+import pytest
+
 from conan.api.model import RecipeReference
 from conan.test.assets.genconanfile import GenConanfile
 from conan.test.utils.tools import TestClient
@@ -33,14 +35,82 @@ def test_legacy_names_filenames():
         """)
     c.save({"conanfile.py": conanfile})
     c.run("create .")
+    assert ("WARN: deprecated: Usage of Conan 1.X features, they have no effect in Conan 2 and "
+            "will be removed in the next major version:") in c.out
     for name in ["cpp_info.names", "cpp_info.filenames", "env_info", "user_info", "cpp_info.build_modules"]:
-        assert f"WARN: deprecated:     '{name}' used in: pkg/1.0" in c.out
+        assert f"    '{name}' used in: pkg/1.0. Use " in c.out
+    assert ("'cpp_info.filenames' used in: pkg/1.0. "
+            'Use set_property("cmake_file_name", ...) instead') in c.out
 
     c.save_home({"global.conf": 'core:skip_warnings=["deprecated"]'})
     c.run("create .")
     for name in ["cpp_info.names", "cpp_info.filenames", "env_info", "user_info",
                  "cpp_info.build_modules"]:
         assert f"'{name}' used in: pkg/1.0" not in c.out
+
+
+class TestLegacyInfoErrors:
+    conanfile = textwrap.dedent("""
+        from conan import ConanFile
+        {}
+        class Pkg(ConanFile):
+            name = "pkg"
+            version = "1.0"
+            def package_info(self):
+                self.cpp_info.set_property("cmake_file_name", "Absl")
+                self.cpp_info.components["comp"].names["cmake_find_package"] = "hello"
+        """)
+
+    def test_warnings_as_errors(self):
+        # The error contains the details, and they are not reported again by the next command
+        c = TestClient(light=True)
+        c.save({"conanfile.py": self.conanfile.format("")})
+        c.save_home({"global.conf": 'core:warnings_as_errors=["deprecated"]'})
+        c.run("create .", assert_error=True)
+        assert "ERROR: deprecated: Usage of Conan 1.X features" in c.out
+        assert "'cpp_info.names' used in: pkg/1.0" in c.out
+        c.save({"conanfile.py": GenConanfile("other", "1.0")})
+        c.run("create .")
+        assert "Conan 1.X" not in c.out
+
+    @pytest.mark.parametrize("required", ["", 'required_conan_version = ">=2.0"'])
+    def test_old_recipes_warn(self, required):
+        c = TestClient(light=True)
+        c.save({"conanfile.py": self.conanfile.format(required)})
+        c.run("create .")
+        assert "'cpp_info.names' used in: pkg/1.0" in c.out
+
+    def test_new_recipes_error(self):
+        c = TestClient(light=True)
+        c.save({"conanfile.py": self.conanfile.format('required_conan_version = ">=2.35"')})
+        c.run("create .", assert_error=True)
+        assert "pkg/1.0: Error in package_info() method, line 9" in c.out
+        assert ("'cpp_info.names' is a Conan 1.X feature that has no effect in Conan 2, "
+                'use set_property("cmake_target_name"/"pkg_config_name", ...) instead') in c.out
+
+    def test_policy_error(self):
+        # Org-wide opt-in, for every recipe, even the ones not declaring required_conan_version
+        c = TestClient(light=True)
+        c.save({"conanfile.py": self.conanfile.format("")})
+        c.save_home({"global.conf": 'core:policies=["required_conan_version>=2.35"]'})
+        c.run("create .", assert_error=True)
+        assert "pkg/1.0: Error in package_info() method, line 9" in c.out
+        assert "'cpp_info.names' is a Conan 1.X feature" in c.out
+
+    def test_user_info_outside_package_info(self):
+        # It used to crash with a TypeError, as there was no package to report
+        c = TestClient(light=True)
+        conanfile = textwrap.dedent("""
+            from conan import ConanFile
+            class Pkg(ConanFile):
+                name = "pkg"
+                version = "1.0"
+                def build(self):
+                    self.user_info.foo = "bar"
+            """)
+        c.save({"conanfile.py": conanfile})
+        c.run("create .")
+        assert "'user_info' used in: unknown, outside package_info()" in c.out
 
 
 class TestLegacy1XRecipes:
