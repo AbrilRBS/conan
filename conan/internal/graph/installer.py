@@ -501,6 +501,14 @@ class BinaryInstaller:
                 self._hook_manager.execute("post_package_info", conanfile=conanfile)
 
         conanfile.cpp_info.check_component_requires(conanfile)
+        unknown = conanfile.cpp_info.unknown_attributes()
+        if unknown:
+            msg = f"Unknown attributes have no effect: {', '.join(unknown)}"
+            if required_conan_version_policy(conanfile, "2.34.9"):
+                raise ConanException(f"{conanfile}: Error in package_info() method:\n\t{msg}. "
+                                     "It is an error when 'required_conan_version' (recipe "
+                                     "attribute or 'core:policies' conf) requires Conan >= 2.35")
+            conanfile.output.warning(msg, warn_tag="deprecated")
         try:
             conanfile.conf_info.validate()
         except ConanException as e:

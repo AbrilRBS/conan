@@ -191,6 +191,11 @@ class _Component:
                 setattr(result, k, copy.copy(v))
         return result
 
+    def unknown_attributes(self):
+        """ Attributes set by the recipe that are not part of the model, so they have no effect,
+        like the Conan 1.X ``version``, or typos like ``system_lib`` """
+        return [k for k in vars(self) if k not in _COMPONENT_ATTRIBUTES]
+
     @property
     def includedirs(self):
         if self._includedirs is None:
@@ -716,6 +721,9 @@ class _Component:
         self._auto_deduce_locations(conanfile, library_name=component_name or conanfile.ref.name)
 
 
+_COMPONENT_ATTRIBUTES = frozenset(vars(_Component()))
+
+
 class CppInfo:
 
     def __init__(self, set_defaults=False):
@@ -763,6 +771,13 @@ class CppInfo:
     @property
     def has_components(self):
         return len(self.components) > 0
+
+    def unknown_attributes(self):
+        result = [f"cpp_info.{a}" for a in self._package.unknown_attributes()]
+        for name, component in self.components.items():
+            result.extend(f'cpp_info.components["{name}"].{a}'
+                          for a in component.unknown_attributes())
+        return result
 
     def merge(self, other, overwrite=False):
         """Merge 'other' into self. 'other' can be an old cpp_info object

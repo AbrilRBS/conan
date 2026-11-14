@@ -97,6 +97,32 @@ class TestLegacyInfoErrors:
         assert "pkg/1.0: Error in package_info() method, line 9" in c.out
         assert "'cpp_info.names' is a Conan 1.X feature" in c.out
 
+    @pytest.mark.parametrize("required", ["", 'required_conan_version = ">=2.35"'])
+    def test_unknown_attributes(self, required):
+        # Like the Conan 1.X cpp_info.version, or typos, that are silently ignored otherwise
+        c = TestClient(light=True)
+        conanfile = textwrap.dedent(f"""
+            from conan import ConanFile
+            {required}
+            class Pkg(ConanFile):
+                name = "pkg"
+                version = "1.0"
+                def package_info(self):
+                    self.cpp_info.version = "1.0"
+                    self.cpp_info.components["comp"].system_requires = ["bcrypt"]
+                    self.cpp_info.components["comp"].system_libs = ["crypt32"]
+            """)
+        c.save({"conanfile.py": conanfile})
+        unknown = ('Unknown attributes have no effect: cpp_info.version, '
+                   'cpp_info.components["comp"].system_requires')
+        if required:
+            c.run("create .", assert_error=True)
+            assert "ERROR: pkg/1.0: Error in package_info() method:" in c.out
+            assert f"{unknown}. It is an error when 'required_conan_version'" in c.out
+        else:
+            c.run("create .")
+            assert f"pkg/1.0: WARN: deprecated: {unknown}" in c.out
+
     def test_user_info_outside_package_info(self):
         # It used to crash with a TypeError, as there was no package to report
         c = TestClient(light=True)
