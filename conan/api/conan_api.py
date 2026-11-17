@@ -37,8 +37,38 @@ from conan.internal.api.local.editable import EditablePackages
 from conan.internal.api.migrations import ClientMigrator
 from conan.internal.model.version_range import validate_conan_version
 from conan.internal.rest.auth_manager import ConanApiAuthManager
-from conan.internal.rest.conan_requester import ConanRequester
 from conan.internal.rest.remote_manager import RemoteManager
+
+
+class _LazyRequester:
+    """ Creates the ConanRequester on the first request: importing "requests" takes ~50 ms, and
+    many commands never make one, like installing or computing graphs from the cache
+    """
+    def __init__(self, global_conf, home_folder):
+        self._global_conf = global_conf
+        self._home_folder = home_folder
+        self._requester = None
+
+    def _get(self):
+        if self._requester is None:
+            from conan.internal.rest.conan_requester import ConanRequester
+            self._requester = ConanRequester(self._global_conf, self._home_folder)
+        return self._requester
+
+    def get(self, url, **kwargs):
+        return self._get().get(url, **kwargs)
+
+    def head(self, url, **kwargs):
+        return self._get().head(url, **kwargs)
+
+    def put(self, url, **kwargs):
+        return self._get().put(url, **kwargs)
+
+    def delete(self, url, **kwargs):
+        return self._get().delete(url, **kwargs)
+
+    def post(self, url, **kwargs):
+        return self._get().post(url, **kwargs)
 
 
 class ConanAPI:
@@ -132,7 +162,7 @@ class ConanAPI:
             self.hook_manager = HookManager(HomePaths(self._conan_api.home_folder).hooks_path)
             self._editable_packages = EditablePackages(self._conan_api.home_folder)
             # Wraps an http_requester to inject proxies, certs, etc
-            self._requester = ConanRequester(self.global_conf, self._conan_api.home_folder)
+            self._requester = _LazyRequester(self.global_conf, self._conan_api.home_folder)
             self.cache = PkgCache(self._conan_api.home_folder, self.global_conf)
             self._settings_yml = None
             self._remote_manager = None
@@ -161,7 +191,7 @@ class ConanAPI:
         def reinit(self):
             self._init_global_conf()
             self.hook_manager.reinit()
-            self._requester = ConanRequester(self.global_conf, self._conan_api.home_folder)
+            self._requester = _LazyRequester(self.global_conf, self._conan_api.home_folder)
             self._settings_yml = None
             self.cache = PkgCache(self._conan_api.home_folder, self.global_conf)
             self._remote_manager = None
