@@ -238,16 +238,31 @@ class VersionRange:
     def intersection(self, other):
         conditions = []
 
-        def _calculate_limits(operator, lhs, rhs):
-            limits = ([c for c in lhs.conditions if operator in c.operator]
-                      + [c for c in rhs.conditions if operator in c.operator])
+        def _calculate_limits(operator, candidates):
+            limits = [c for c in candidates if operator in c.operator]
             return sorted(limits, reverse=operator == ">")[0] if limits else None
+
+        def _pattern_limits(pattern):
+            # "1.2.*" (stored as the "1.2." prefix) is within ">=1.2 <1.3", but that range also
+            # contains "1.2" (and Version("1.2") == Version("1.2.0"), so ">1.2" isn't an option),
+            # so the pattern itself must be kept too. Other patterns ("1.2*", "1.2.3+4.*"...) don't
+            # have limits
+            prefix = str(pattern.display_version)
+            items = prefix[:-1].split(".")
+            if not prefix.endswith(".") or not all(i.isdigit() for i in items):
+                return []
+            upper = ".".join(items[:-1] + [str(int(items[-1]) + 1)])
+            return [_Condition(">=", Version(prefix[:-1])), _Condition("<", Version(upper))]
 
         prerelease = True
         for lhs_conditions in self.condition_sets:
             for rhs_conditions in other.condition_sets:
                 all_conditions = lhs_conditions.conditions + rhs_conditions.conditions
                 exact = next((c for c in all_conditions if c.operator == "="), None)
+                patterns = [c for c in all_conditions if c.operator == "*"]
+                # Patterns match by string prefix, so they only intersect if all of them are a
+                # prefix of the longest one, and then that one is the only one needed
+                pattern = max(patterns, key=lambda p: len(str(p.display_version)), default=None)
                 if exact is not None:
                     # The only possible version is the exact one, as long as every other condition
                     # (other "=" ones included) accepts it. Prereleases are decided for the whole
@@ -255,17 +270,26 @@ class VersionRange:
                     all_set = _ConditionSet.from_conditions(all_conditions, prerelease=True)
                     if all_set.valid(exact.version, conf_resolve_prepreleases=True):
                         conditions.append([exact])
-                else:
-                    lower_limit = _calculate_limits(">", lhs_conditions, rhs_conditions)
-                    upper_limit = _calculate_limits("<", lhs_conditions, rhs_conditions)
+                elif all(str(pattern.display_version).startswith(str(p.display_version))
+                         for p in patterns):
+                    # The pattern limits narrow the range and detect empty ones. They go last, so on
+                    # ties the explicit ones win (">=1.0" over the ">=1" of "1.*")
+                    limits = [c for c in all_conditions if c.operator != "*"]
+                    for p in patterns:
+                        limits.extend(_pattern_limits(p))
+                    lower_limit = _calculate_limits(">", limits)
+                    upper_limit = _calculate_limits("<", limits)
+                    kept_pattern = [pattern] if pattern is not None else []
 
                     if lower_limit and upper_limit:
                         if lower_limit <= upper_limit:
-                            conditions.append([lower_limit, upper_limit])
+                            conditions.append([lower_limit, upper_limit] + kept_pattern)
                     elif lower_limit:
-                        conditions.append([lower_limit])
+                        conditions.append([lower_limit] + kept_pattern)
                     elif upper_limit:
-                        conditions.append([upper_limit])
+                        conditions.append([upper_limit] + kept_pattern)
+                    elif kept_pattern:
+                        conditions.append(kept_pattern)
 
                 # conservative approach: if any of the conditions forbid prereleases, forbid them in the result
                 if not lhs_conditions.prerelease or not rhs_conditions.prerelease:
