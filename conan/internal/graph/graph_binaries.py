@@ -561,7 +561,12 @@ class GraphBinariesAnalyzer:
 
                 # Third pass, mark requires as skippeable
                 for dep in node.transitive_deps.values():
-                    dep.require.skip = dep.node not in deps_required
+                    # If the dependency cannot skip its binary, consumers must see it too
+                    # TODO: no_skip=True in an intermediate package still hides the dependency
+                    #  from downstream consumers, as copy_requirement() does not propagate it
+                    dep.require.skip = (dep.node not in deps_required and
+                                        dep.node.conanfile.conf.get("tools.graph:skip_binaries",
+                                                                    check_type=bool, default=True))
 
                 # Finally accumulate all needed nodes for marking binaries as SKIP download
                 news_req = [r for r in deps_required

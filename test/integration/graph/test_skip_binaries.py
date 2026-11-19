@@ -150,6 +150,37 @@ def test_conf_skip():
     client.assert_listed_binary({"ai/1.0": (NO_SETTINGS_PACKAGE_ID, "Skip")})
 
 
+def test_conf_skip_dependencies_visible():
+    # https://github.com/conan-io/conan/issues/20540
+    # app -> pkg (shared) -> dep (static), when the dep binary is not skipped,
+    # it should be visible to the consumer generators too
+    client = TestClient()
+    client.save({"dep/conanfile.py": GenConanfile("dep", "1.0").with_shared_option(False),
+                 "pkg/conanfile.py": GenConanfile("pkg", "1.0").with_requirement("dep/1.0")
+                                                                .with_shared_option(True)})
+    client.run("create dep")
+    dep_id = client.created_package_id("dep/1.0")
+    client.run("create pkg")
+
+    app = textwrap.dedent("""
+        from conan import ConanFile
+        class App(ConanFile):
+            requires = "pkg/1.0"
+            def generate(self):
+                deps = sorted(str(d.ref) for d in self.dependencies.host.values())
+                self.output.info(f"HOST DEPS: {deps}")
+        """)
+    client.save({"app/conanfile.py": app})
+    client.run("install app -v")
+    client.assert_listed_binary({"dep/1.0": (dep_id, "Skip")})
+    assert "HOST DEPS: ['pkg/1.0']" in client.out
+
+    for conf in ("*:tools.graph:skip_binaries=False", "dep/*:tools.graph:skip_binaries=False"):
+        client.run(f"install app -v -c {conf}")
+        client.assert_listed_binary({"dep/1.0": (dep_id, "Cache")})
+        assert "HOST DEPS: ['dep/1.0', 'pkg/1.0']" in client.out
+
+
 def test_skipped_intermediate_header():
     # app -> libc/0.1 (static) -> libb0.1 (header) -> liba0.1 (static)
     # This libb0.1 cannot be skipped because it is necessary its lib-config.cmake for transitivity
