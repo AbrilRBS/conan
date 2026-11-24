@@ -515,3 +515,26 @@ def test_graph_info_provides_conflict_html():
     # It got properly serialized
     assert '"type": "provide_conflict"' in tc.out
     assert "Both 'bar/1.0' and 'foo/1.0' provide '['bar']'" in tc.out
+
+
+def test_graph_json_output_format():
+    """ The json output is written a node at a time, check that it is the same text that dumping
+    the whole graph at once, with the filters, without nodes, and with an error in the graph """
+    c = TestClient()
+    c.save({"dep/conanfile.py": GenConanfile("dep", "0.1"),
+            "pkg/conanfile.py": GenConanfile("pkg", "0.1").with_requires("dep/0.1"),
+            "conanfile.py": GenConanfile().with_requires("pkg/0.1")})
+    c.run("export dep")
+    c.run("export pkg")
+    for args in ("", "--package-filter=dep*", "--package-filter=&", "--package-filter=nothing",
+                 "--filter=binary --filter=dependencies"):
+        c.run(f"graph info . --format=json {args}")
+        assert c.stdout == json.dumps(json.loads(c.stdout), indent=4) + "\n"
+    c.run("install . --build=missing --format=json")
+    graph = json.loads(c.stdout)
+    assert graph["graph"]["nodes"]["2"]["cpp_info"]
+    assert c.stdout == json.dumps(graph, indent=4) + "\n"
+    c.run("graph info --requires=missing/0.1 --format=json", assert_error=True)
+    graph = json.loads(c.stdout)
+    assert graph["graph"]["error"]
+    assert c.stdout == json.dumps(graph, indent=4) + "\n"

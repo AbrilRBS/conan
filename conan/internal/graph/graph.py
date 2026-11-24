@@ -436,10 +436,16 @@ class DepsGraph:
         if self.error:
             raise self.error
 
-    def serialize(self):
+    def serialize(self, lazy_nodes=False):
+        """
+        :param lazy_nodes: "nodes" is an iterator of the (id, serialized node) items instead of a
+            dict, that serializes every node when it is iterated, so the output of a large graph
+            can be written one node at a time, without all of them in memory
+        """
         for i, n in enumerate(self.nodes):
             n.id = str(i)
-        result = {"nodes": {n.id: n.serialize() for n in self.nodes},
+        nodes = ((n.id, n.serialize()) for n in self.nodes)
+        result = {"nodes": nodes if lazy_nodes else dict(nodes),
                   "root": {self.root.id: repr(self.root.ref)},
                   "overrides": self.overrides().serialize(),
                   "resolved_ranges": {repr(r): s.repr_notime()

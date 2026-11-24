@@ -1,4 +1,5 @@
 import fnmatch
+import itertools
 import os
 import sys
 import time
@@ -383,15 +384,35 @@ def cli_out_write(data, fg=None, bg=None, endline="\n", indentation=0):
         data = f"{' ' * indentation}{fg or ''}{bg or ''}{data}{Style.RESET_ALL}{endline}"
         sys.stdout.write(data)
     else:
-        data = f"{' ' * indentation}{data}{endline}"
-        if sys.stdout.isatty():
-            # https://github.com/conan-io/conan/issues/17245 avoid colorama crash and overhead
-            # skip deinit/reinit if stdout is not a TTY to preserve redirected output to file
-            colorama.deinit()
-            sys.stdout.write(data)
+        # Not concatenated, a large output (like a json) would be copied
+        _write_stdout((" " * indentation, str(data), endline))
+
+
+def cli_out_write_chunks(chunks, endline="\n"):
+    """
+    Like ``cli_out_write()``, without colors, for an output given as an iterable of strings, that
+    are written as they are generated, so a large output is never in memory all at once
+    """
+    _write_stdout(itertools.chain(chunks, (endline, )))
+
+
+_WRITE_SIZE = 1 << 20
+
+
+def _write_stdout(chunks):
+    tty = sys.stdout.isatty()
+    if tty:
+        # https://github.com/conan-io/conan/issues/17245 avoid colorama crash and overhead
+        # skip deinit/reinit if stdout is not a TTY to preserve redirected output to file
+        colorama.deinit()
+    try:
+        for chunk in chunks:
+            # Writing a large string at once encodes all of it in a copy, write it in pieces
+            for i in range(0, len(chunk), _WRITE_SIZE):
+                sys.stdout.write(chunk[i:i + _WRITE_SIZE])
+    finally:
+        if tty:
             colorama.reinit()
-        else:
-            sys.stdout.write(data)
 
 
 class TimedOutput:

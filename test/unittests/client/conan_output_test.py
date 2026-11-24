@@ -4,7 +4,7 @@ from unittest import mock
 import pytest
 import textwrap
 
-from conan.api.output import ConanOutput, init_colorama
+from conan.api.output import ConanOutput, init_colorama, cli_out_write, cli_out_write_chunks
 from conan.test.utils.mocks import RedirectedTestOutput
 from conan.test.utils.tools import redirect_output
 
@@ -67,3 +67,17 @@ def test_output_no_trim():
         output.info(msg)
     assert "Hello world " in stderr.getvalue()
     assert "my package" in stderr.getvalue()
+
+
+def test_cli_out_write():
+    """ A large output is written in pieces, not copied, and the ones given in chunks are written
+    as they come, with the same result """
+    stdout = RedirectedTestOutput()
+    big = "".join(chr(ord("a") + i % 26) for i in range(3 * 1024 * 1024 + 5))
+    with redirect_output(RedirectedTestOutput(), stdout):
+        cli_out_write(big)
+        cli_out_write(42, indentation=2)  # Not only strings
+        cli_out_write("no newline", endline="")
+        cli_out_write_chunks(iter(["a", "", "b" * 10]))
+        cli_out_write_chunks(iter([]))
+    assert stdout.getvalue() == f"{big}\n  42\nno newlinea{'b' * 10}\n\n"

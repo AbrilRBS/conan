@@ -4,34 +4,39 @@ from conan.api.model import RecipeReference
 from conan.api.output import ConanOutput, cli_out_write
 
 
-def filter_graph(graph, package_filter=None, field_filter=None):
-    if package_filter is not None:
-        def _matching(node, pattern):
-            if fnmatch.fnmatch(node["ref"] or "", pattern):
-                return True
-            if pattern == "&":  # Handle the consumer pattern
-                if node["recipe"] == "Consumer":
-                    return True
-                # How to deal with --requires=xxx --package-filter=& "consumers"
-                root = graph["nodes"]["0"]
-                if root["recipe"] == "Cli" and node is not root:
-                    # We look if the current node is a direct dependency of the root node
-                    node_ref = RecipeReference.loads(node["ref"])
-                    for dep in root["dependencies"].values():
-                        if dep["direct"] and node_ref == RecipeReference.loads(dep["ref"]):
-                            return True
+def filter_nodes(nodes, package_filter=None, field_filter=None):
+    """ The (id, serialized node) items of ``nodes``, the root one first, that match the package
+    filter, with only the fields in the field filter. One by one, as they are iterated, so it
+    works with the lazy nodes of ``DepsGraph.serialize(lazy_nodes=True)``
+    """
+    if field_filter is not None and "ref" not in field_filter:
+        field_filter.append("ref")
+    root = None
+    for id_, node in nodes:
+        if root is None:
+            root = node
+        if package_filter is not None and not any(_matching(node, p, root)
+                                                  for p in package_filter):
+            continue
+        if field_filter is not None:
+            node = {k: v for k, v in node.items() if k in field_filter}
+        yield id_, node
 
-        graph["nodes"] = {id_: n for id_, n in graph["nodes"].items()
-                          if any(_matching(n, p) for p in package_filter)}
-    if field_filter is not None:
-        if "ref" not in field_filter:
-            field_filter.append("ref")
-        result = {}
-        for id_, n in graph["nodes"].items():
-            new_node = {k: v for k, v in n.items() if k in field_filter}
-            result[id_] = new_node
-        graph["nodes"] = result
-    return graph
+
+def _matching(node, pattern, root):
+    if fnmatch.fnmatch(node["ref"] or "", pattern):
+        return True
+    if pattern == "&":  # Handle the consumer pattern
+        if node["recipe"] == "Consumer":
+            return True
+        # How to deal with --requires=xxx --package-filter=& "consumers"
+        if root["recipe"] == "Cli" and node is not root:
+            # We look if the current node is a direct dependency of the root node
+            node_ref = RecipeReference.loads(node["ref"])
+            for dep in root["dependencies"].values():
+                if dep["direct"] and node_ref == RecipeReference.loads(dep["ref"]):
+                    return True
+    return False
 
 
 def format_graph_info(result):
@@ -43,9 +48,8 @@ def format_graph_info(result):
     package_filter = result["package_filter"]
 
     ConanOutput().subtitle("Basic graph information")
-    serial = graph.serialize()
-    serial = filter_graph(serial, package_filter, field_filter)
-    for n in serial["nodes"].values():
+    serial = graph.serialize(lazy_nodes=True)
+    for _, n in filter_nodes(serial["nodes"], package_filter, field_filter):
         # A write per node, not per line: every cli_out_write() call checks isatty() (and resets
         # colorama in a terminal), and large graphs print hundreds of thousands of lines
         lines = [f"{n['ref']}:"]  # FIXME: This can be empty for consumers and it is ugly ":"

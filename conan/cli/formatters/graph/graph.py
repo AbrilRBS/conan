@@ -3,8 +3,8 @@ import os
 
 from jinja2 import Template, select_autoescape
 
-from conan.api.output import cli_out_write
-from conan.cli.formatters.graph.graph_info_text import filter_graph
+from conan.api.output import cli_out_write, cli_out_write_chunks
+from conan.cli.formatters.graph.graph_info_text import filter_nodes
 from conan.cli.formatters.graph.info_graph_dot import graph_info_dot
 from conan.cli.formatters.graph.info_graph_html import graph_info_html
 
@@ -47,7 +47,26 @@ def format_graph_json(result):
     graph = result["graph"]
     field_filter = result.get("field_filter")
     package_filter = result.get("package_filter")
-    serial = graph.serialize()
-    serial = filter_graph(serial, package_filter=package_filter, field_filter=field_filter)
-    json_result = json.dumps({"graph": serial}, indent=4)
-    cli_out_write(json_result)
+    serial = graph.serialize(lazy_nodes=True)
+    serial["nodes"] = filter_nodes(serial["nodes"], package_filter, field_filter)
+    cli_out_write_chunks(_graph_json_chunks(serial))
+
+
+def _graph_json_chunks(serial):
+    """ The text of ``json.dumps({"graph": serial}, indent=4)``, a node at a time: for a large graph,
+    the serialized nodes and the json text take more memory than the graph itself
+    """
+    def _dumps(value, level):  # As if nested in the document <level> levels deep
+        return json.dumps(value, indent=4).replace("\n", "\n" + "    " * level)
+
+    yield '{\n    "graph": {\n        "nodes": {'
+    any_node = False
+    for id_, node in serial["nodes"]:
+        yield ",\n" if any_node else "\n"
+        yield f"            {json.dumps(id_)}: {_dumps(node, 3)}"
+        any_node = True
+    yield "\n        }" if any_node else "}"
+    for key, value in serial.items():
+        if key != "nodes":
+            yield f",\n        {json.dumps(key)}: {_dumps(value, 2)}"
+    yield "\n    }\n}"
